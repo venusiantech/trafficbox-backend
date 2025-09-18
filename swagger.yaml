@@ -1,0 +1,290 @@
+openapi: 3.0.0
+info:
+  title: 9Hits Backend API
+  version: 1.0.0
+  description: API documentation for 9Hits backend wrapper
+servers:
+  - url: http://localhost:5000
+paths:
+  /api/auth/register:
+    post:
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                dob:
+                  type: string
+                  format: date
+              required:
+                - email
+                - password
+      responses:
+        "200":
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:
+                    type: string
+        "400":
+          description: Email already registered
+        "500":
+          description: Server error
+  /api/auth/login:
+    post:
+      summary: Login a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+              required:
+                - email
+                - password
+      responses:
+        "200":
+          description: User logged in
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  token:
+                    type: string
+        "401":
+          description: Invalid credentials
+        "500":
+          description: Server error
+  /api/campaigns:
+    post:
+      summary: Create a campaign
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                urls:
+                  type: array
+                  items:
+                    type: string
+                duration_min:
+                  type: integer
+                duration_max:
+                  type: integer
+                countries:
+                  type: array
+                  items:
+                    type: string
+                rule:
+                  type: string
+                  enum: [all, any, except]
+                macros:
+                  type: string
+                metadata:
+                  type: object
+              required:
+                - urls
+      responses:
+        "200":
+          description: Campaign created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  campaign:
+                    $ref: "#/components/schemas/Campaign"
+                  nineRaw:
+                    type: object
+        "400":
+          description: Bad request
+        "500":
+          description: Server error
+  /api/campaigns/{id}:
+    get:
+      summary: Get campaign by ID
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      responses:
+        "200":
+          description: Campaign found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+        "500":
+          description: Server error
+  /api/account:
+    get:
+      summary: Get 9Hits profile
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Profile data
+          content:
+            application/json:
+              schema:
+                type: object
+        "500":
+          description: Server error
+  /api/websites:
+    post:
+      summary: Add a new website for the logged-in user
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                title:
+                  type: string
+                description:
+                  type: string
+                metadata:
+                  type: object
+              required:
+                - url
+      responses:
+        "200":
+          description: Website added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  website:
+                    $ref: "#/components/schemas/Website"
+        "400":
+          description: url is required
+        "500":
+          description: Server error
+    get:
+      summary: Get all websites for the logged-in user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of websites
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  websites:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Website"
+        "500":
+          description: Server error
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Campaign:
+      type: object
+      properties:
+        _id:
+          type: string
+        user:
+          type: string
+        title:
+          type: string
+        urls:
+          type: array
+          items:
+            type: string
+        duration_min:
+          type: integer
+        duration_max:
+          type: integer
+        countries:
+          type: array
+          items:
+            type: string
+        rule:
+          type: string
+        macros:
+          type: string
+        nine_hits_campaign_id:
+          type: integer
+        state:
+          type: string
+        metadata:
+          type: object
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+    Website:
+      type: object
+      properties:
+        _id:
+          type: string
+        user:
+          type: string
+        url:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        isActive:
+          type: boolean
+        metadata:
+          type: object
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
