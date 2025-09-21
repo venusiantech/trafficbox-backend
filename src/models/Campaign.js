@@ -19,6 +19,7 @@ const campaignSchema = new mongoose.Schema(
     is_coin_mining: { type: Boolean, default: false },
     state: { type: String },
     nine_hits_campaign_id: { type: Number, index: true },
+    nine_hits_data: { type: Object }, // store full 9Hits campaign data
     last_sync_at: Date,
     metadata: { type: mongoose.Schema.Types.Mixed },
   },

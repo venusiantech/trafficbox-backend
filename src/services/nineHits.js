@@ -52,6 +52,12 @@ async function sessionStats() {
   return resp.data;
 }
 
+// Pause a campaign by setting userState to 'paused'
+async function sitePause({ id }) {
+  if (!id) throw new Error("id is required");
+  return await siteUpdate({ id, userState: "paused" });
+}
+
 module.exports = {
   profileGet,
   siteGet,
@@ -60,4 +66,5 @@ module.exports = {
   siteDel,
   sessionStats,
   getUuidV4, // Export the async uuidv4 getter
+  sitePause, // Export the pause function
 };

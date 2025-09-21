@@ -22,29 +22,56 @@ router.post("/", auth(), async (req, res) => {
     if (body.is_adult === undefined) body.is_adult = false;
     if (body.is_coin_mining === undefined) body.is_coin_mining = false;
 
+    // Default payload for campaign creation
+    const defaultPayload = {
+      title: "Test Campaign",
+      urls: [],
+      duration: [5, 15],
+      referrers: { mode: "basic", urls: [] },
+      platform: { usage: { system: 100, fixed: 0, custom: 0 } },
+      macros: "",
+      popupMacros: "",
+      connectionTypes: ["system"],
+      geo: { rule: "any", by: "country", codes: [] },
+      capping: { type: "own", value: 3600 },
+      maxHits: 5,
+      maxPopups: 0,
+      allowProxy: true,
+      allowIPv6: true,
+      bypassCf: false,
+      similarWebEnabled: false,
+      fingerprintSpoof: false,
+      userState: "running",
+    };
+    // Merge user input with defaults (user input takes precedence)
+    const merged = { ...defaultPayload, ...req.body };
+
     // Build payload (still 9Hits style for now, but can be extended per vendor)
     const payload = {
-      title: body.title || `campaign-${Date.now()}`,
-      urls: [body.url.trim()],
-      duration: [body.duration_min || 30, body.duration_max || 60],
-      geo: {
-        rule: body.rule || "any",
-        by: "country",
-        codes: body.countries || [],
-      },
-      macros: body.macros || "",
-      isAdult: body.is_adult === true,
-      hasCoinMining: body.is_coin_mining === true,
+      title: merged.title || `campaign-${Date.now()}`,
+      urls: merged.urls,
+      duration: merged.duration,
+      geo: merged.geo,
+      macros: merged.macros,
+      isAdult: merged.isAdult === true,
+      hasCoinMining: merged.hasCoinMining === true,
+      popupMacros: merged.popupMacros,
+      maxHits: merged.maxHits,
+      untilDate: merged.untilDate,
+      capping: merged.capping,
+      platform: merged.platform,
+      referrers: merged.referrers,
+      connectionTypes: merged.connectionTypes,
+      connectionSpeed: merged.connectionSpeed,
+      performance: merged.performance,
+      maxPopups: merged.maxPopups,
+      allowProxy: merged.allowProxy,
+      allowIPv6: merged.allowIPv6,
+      bypassCf: merged.bypassCf,
+      similarWebEnabled: merged.similarWebEnabled,
+      fingerprintSpoof: merged.fingerprintSpoof,
+      userState: merged.userState,
     };
-    if (body.popup_macros) payload.popupMacros = body.popup_macros;
-    if (body.max_hits) payload.maxHits = body.max_hits;
-    if (body.until_date) payload.untilDate = body.until_date;
-    if (body.capping) payload.capping = body.capping;
-    if (body.platform) payload.platform = body.platform;
-    if (body.referrers) payload.referrers = body.referrers;
-    if (body.connection_types) payload.connectionTypes = body.connection_types;
-    if (body.connection_speed) payload.connectionSpeed = body.connection_speed;
-    if (body.performance) payload.performance = body.performance;
 
     console.log(
       "Payload being sent to vendor:",
@@ -55,8 +82,34 @@ router.post("/", auth(), async (req, res) => {
     const idempotencyKey = await vendor.getUuidV4();
     const vendorResp = await vendor.createCampaign(payload, idempotencyKey);
     console.log("Vendor createCampaign response:", vendorResp);
-    const vendorId =
+    // Try to extract vendorId from data.id or from messages (e.g., 'Created #40633533')
+    let vendorId =
       (vendorResp && vendorResp.data && vendorResp.data.id) || null;
+    if (!vendorId && vendorResp && Array.isArray(vendorResp.messages)) {
+      const match = vendorResp.messages.join(" ").match(/#(\d+)/);
+      if (match) vendorId = match[1];
+    }
+
+    // Fetch full campaign details from 9Hits
+    let nineHitsData = null;
+    if (vendorId) {
+      try {
+        const nine = require("../services/nineHits");
+        const detailsResp = await nine.siteGet({ filter: `id:${vendorId}` });
+        if (
+          detailsResp &&
+          Array.isArray(detailsResp.data) &&
+          detailsResp.data.length > 0
+        ) {
+          nineHitsData = detailsResp.data[0];
+        }
+      } catch (err) {
+        nineHitsData = {
+          error: "Failed to fetch full 9Hits data",
+          details: err.message,
+        };
+      }
+    }
 
     const camp = new Campaign({
       user: userId,
@@ -72,6 +125,7 @@ router.post("/", auth(), async (req, res) => {
       nine_hits_campaign_id: vendorId, // for 9Hits, or generic vendor_campaign_id
       state: vendorResp && vendorResp.status,
       metadata: body.metadata,
+      nine_hits_data: nineHitsData, // store all 9Hits fields
     });
 
     await camp.save();
@@ -88,7 +142,159 @@ router.get("/:id", auth(), async (req, res) => {
     if (!c) return res.status(404).json({ error: "Not found" });
     if (c.user.toString() !== req.user.id && req.user.role !== "admin")
       return res.status(403).json({ error: "Forbidden" });
-    res.json(c);
+
+    // Fetch vendor stats if possible
+    let vendorStats = null;
+    if (c.nine_hits_campaign_id) {
+      try {
+        const nine = require("../services/nineHits");
+        const statsResp = await nine.siteGet({ id: c.nine_hits_campaign_id });
+        vendorStats = statsResp;
+      } catch (err) {
+        vendorStats = {
+          error: "Failed to fetch vendor stats",
+          details: err.message,
+        };
+      }
+    }
+
+    res.json({ ...c.toObject(), vendorStats });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pause campaign
+router.post("/:id/pause", auth(), async (req, res) => {
+  try {
+    const c = await Campaign.findById(req.params.id);
+    if (!c) return res.status(404).json({ error: "Not found" });
+    if (c.user.toString() !== req.user.id && req.user.role !== "admin")
+      return res.status(403).json({ error: "Forbidden" });
+
+    // Pause on vendor if possible
+    let vendorResp = null;
+    if (c.nine_hits_campaign_id) {
+      try {
+        const nine = require("../services/nineHits");
+        vendorResp = await nine.sitePause({ id: c.nine_hits_campaign_id });
+      } catch (err) {
+        vendorResp = { error: err.message };
+      }
+    }
+    c.state = "paused";
+    await c.save();
+    res.json({ ok: true, campaign: c, vendorResp });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Resume campaign
+router.post("/:id/resume", auth(), async (req, res) => {
+  try {
+    const c = await Campaign.findById(req.params.id);
+    if (!c) return res.status(404).json({ error: "Not found" });
+    if (c.user.toString() !== req.user.id && req.user.role !== "admin")
+      return res.status(403).json({ error: "Forbidden" });
+
+    // Resume on vendor if possible
+    let vendorResp = null;
+    if (c.nine_hits_campaign_id) {
+      try {
+        const nine = require("../services/nineHits");
+        vendorResp = await nine.siteUpdate({
+          id: c.nine_hits_campaign_id,
+          userState: "running",
+        });
+      } catch (err) {
+        vendorResp = { error: err.message };
+      }
+    }
+    c.state = "ok";
+    c.userState = "running";
+    await c.save();
+    res.json({ ok: true, campaign: c, vendorResp });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Update campaign
+router.put("/:id", auth(), async (req, res) => {
+  try {
+    const c = await Campaign.findById(req.params.id);
+    if (!c) return res.status(404).json({ error: "Not found" });
+    if (c.user.toString() !== req.user.id && req.user.role !== "admin")
+      return res.status(403).json({ error: "Forbidden" });
+
+    // Update fields locally
+    const updatable = [
+      "title",
+      "urls",
+      "duration_min",
+      "duration_max",
+      "countries",
+      "rule",
+      "macros",
+      "is_adult",
+      "is_coin_mining",
+      "metadata",
+    ];
+    updatable.forEach((f) => {
+      if (req.body[f] !== undefined) c[f] = req.body[f];
+    });
+
+    // Update on vendor if possible
+    let vendorResp = null;
+    if (c.nine_hits_campaign_id) {
+      try {
+        const nine = require("../services/nineHits");
+        vendorResp = await nine.siteUpdate({
+          id: c.nine_hits_campaign_id,
+          ...req.body,
+        });
+      } catch (err) {
+        vendorResp = { error: err.message };
+      }
+    }
+    await c.save();
+    res.json({ ok: true, campaign: c, vendorResp });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete campaign
+router.delete("/:id", auth(), async (req, res) => {
+  try {
+    const c = await Campaign.findById(req.params.id);
+    if (!c) return res.status(404).json({ error: "Not found" });
+    if (c.user.toString() !== req.user.id && req.user.role !== "admin")
+      return res.status(403).json({ error: "Forbidden" });
+
+    // Delete on vendor if possible
+    let vendorResp = null;
+    if (c.nine_hits_campaign_id) {
+      try {
+        const nine = require("../services/nineHits");
+        vendorResp = await nine.siteDelete({ id: c.nine_hits_campaign_id });
+      } catch (err) {
+        vendorResp = { error: err.message };
+      }
+    }
+    await c.deleteOne();
+    res.json({ ok: true, vendorResp });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List all campaigns (admin only)
+router.get("/", auth("admin"), async (req, res) => {
+  try {
+    const campaigns = await Campaign.find({});
+    res.json({ ok: true, campaigns });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
