@@ -6,11 +6,11 @@ const vendors = require("../services/vendors");
 const router = express.Router();
 
 // Create campaign -> siteAdd
-router.post("/", auth(), async (req, res) => {
+router.post("/:vendor", auth(), async (req, res) => {
   try {
     const userId = req.user.id;
     const body = req.body;
-    const vendorName = body.vendor || "nineHits";
+    const vendorName = req.params.vendor || "nineHits";
     const vendor = vendors[vendorName];
     if (!vendor) return res.status(400).json({ error: "Invalid vendor" });
 
@@ -45,6 +45,77 @@ router.post("/", auth(), async (req, res) => {
     };
     // Merge user input with defaults (user input takes precedence)
     const merged = { ...defaultPayload, ...req.body };
+
+    // SparkTraffic integration
+    if (vendorName === "sparkTraffic") {
+      // Always use economy size
+      const sparkPayload = {
+        unique_id: merged.unique_id || undefined,
+        created_at: merged.created_at || Date.now(),
+        expires_at: merged.expires_at || 0,
+        title: merged.title,
+        size: "economy",
+        multiplier: merged.multiplier || 0,
+        speed: merged.speed || 0,
+        "urls-1": merged.urls && merged.urls[0] ? merged.urls[0] : merged.url,
+        "urls-2": merged.urls && merged.urls[1] ? merged.urls[1] : undefined,
+        "urls-3": merged.urls && merged.urls[2] ? merged.urls[2] : undefined,
+        "urls-4": merged.urls && merged.urls[3] ? merged.urls[3] : undefined,
+        "urls-5": merged.urls && merged.urls[4] ? merged.urls[4] : undefined,
+        "urls-6": merged.urls && merged.urls[5] ? merged.urls[5] : undefined,
+        "urls-7": merged.urls && merged.urls[6] ? merged.urls[6] : undefined,
+        "urls-8": merged.urls && merged.urls[7] ? merged.urls[7] : undefined,
+        "urls-9": merged.urls && merged.urls[8] ? merged.urls[8] : undefined,
+        "urls-10": merged.urls && merged.urls[9] ? merged.urls[9] : undefined,
+        "urls-11": merged.urls && merged.urls[10] ? merged.urls[10] : undefined,
+        traffic_type: merged.traffic_type || "direct",
+        keywords: merged.keywords || "",
+        referrers:
+          merged.referrers && merged.referrers.urls
+            ? merged.referrers.urls.join(",")
+            : "",
+        social_links: merged.social_links || "",
+        languages: merged.languages || "",
+        bounce_rate: merged.bounce_rate || 0,
+        return_rate: merged.return_rate || 0,
+        click_outbound_events: merged.click_outbound_events || 0,
+        form_submit_events: merged.form_submit_events || 0,
+        scroll_events: merged.scroll_events || 0,
+        time_on_page: merged.time_on_page || "5sec",
+        desktop_rate: merged.desktop_rate || 0,
+        auto_renew: merged.auto_renew || "true",
+        geo_type: merged.geo_type || "global",
+        geo: merged.geo && merged.geo.codes ? merged.geo.codes.join(",") : "",
+        shortener: merged.shortener || "",
+        rss_feed: merged.rss_feed || "",
+        ga_id: merged.ga_id || "",
+      };
+      try {
+        const vendorResp = await vendor.createProject(sparkPayload);
+        console.log(vendorResp);
+        // Save to DB
+        const camp = new Campaign({
+          user: userId,
+          title: sparkPayload.title,
+          urls: merged.urls,
+          duration_min: merged.duration[0],
+          duration_max: merged.duration[1],
+          countries: merged.geo.codes,
+          rule: merged.geo.rule,
+          macros: merged.macros,
+          is_adult: merged.is_adult,
+          is_coin_mining: merged.is_coin_mining,
+          spark_traffic_project_id: vendorResp["new-id"],
+          state: "created",
+          metadata: body.metadata,
+          spark_traffic_data: vendorResp,
+        });
+        await camp.save();
+        return res.json({ ok: true, campaign: camp, vendorRaw: vendorResp });
+      } catch (err) {
+        return res.status(500).json({ error: err.message });
+      }
+    }
 
     // Build payload (still 9Hits style for now, but can be extended per vendor)
     const payload = {
