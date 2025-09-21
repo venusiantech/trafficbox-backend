@@ -48,26 +48,17 @@ router.post("/:vendor", auth(), async (req, res) => {
 
     // SparkTraffic integration
     if (vendorName === "sparkTraffic") {
-      // Always use economy size
+      // Always use demo size (economy not supported)
       const sparkPayload = {
         unique_id: merged.unique_id || undefined,
         created_at: merged.created_at || Date.now(),
         expires_at: merged.expires_at || 0,
         title: merged.title,
-        size: "economy",
+        size: "eco", // required field despite support saying otherwise
         multiplier: merged.multiplier || 0,
-        speed: merged.speed || 0,
+        speed: merged.speed || 0, // volume of credits to use per day
         "urls-1": merged.urls && merged.urls[0] ? merged.urls[0] : merged.url,
-        "urls-2": merged.urls && merged.urls[1] ? merged.urls[1] : undefined,
-        "urls-3": merged.urls && merged.urls[2] ? merged.urls[2] : undefined,
-        "urls-4": merged.urls && merged.urls[3] ? merged.urls[3] : undefined,
-        "urls-5": merged.urls && merged.urls[4] ? merged.urls[4] : undefined,
-        "urls-6": merged.urls && merged.urls[5] ? merged.urls[5] : undefined,
-        "urls-7": merged.urls && merged.urls[6] ? merged.urls[6] : undefined,
-        "urls-8": merged.urls && merged.urls[7] ? merged.urls[7] : undefined,
-        "urls-9": merged.urls && merged.urls[8] ? merged.urls[8] : undefined,
-        "urls-10": merged.urls && merged.urls[9] ? merged.urls[9] : undefined,
-        "urls-11": merged.urls && merged.urls[10] ? merged.urls[10] : undefined,
+        // SparkTraffic only supports one URL per project, so we don't send additional URLs
         traffic_type: merged.traffic_type || "direct",
         keywords: merged.keywords || "",
         referrers:
