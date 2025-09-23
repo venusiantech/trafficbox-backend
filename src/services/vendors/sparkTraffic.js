@@ -13,6 +13,23 @@ async function createProject(data) {
   return resp.data;
 }
 
+// Pause a SparkTraffic project
+async function pauseProject(projectId) {
+  // Replace with the actual SparkTraffic pause endpoint and payload if available
+  const resp = await axios.post(
+    `https://v2.sparktraffic.com/pause-website-traffic-project`,
+    { id: projectId },
+    {
+      headers: {
+        "Content-Type": "application/json",
+        API_KEY: API_KEY,
+      },
+    }
+  );
+  return resp.data;
+}
+
 module.exports = {
   createProject,
+  pauseProject,
 };

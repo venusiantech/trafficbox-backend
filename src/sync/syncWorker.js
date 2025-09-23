@@ -1,8 +1,10 @@
 const cron = require("node-cron");
 const Campaign = require("../models/Campaign");
 const nine = require("../services/nineHits");
+const { cleanupArchivedCampaigns } = require("../utils/archiveCleanup");
 
 module.exports = function () {
+  // Main sync job
   const expression = process.env.SYNC_CRON || "*/5 * * * *";
   cron.schedule(expression, async () => {
     try {
@@ -39,4 +41,23 @@ module.exports = function () {
       console.error("[sync] worker failed", e.message);
     }
   });
+
+  // Archive cleanup job - runs daily at 2 AM
+  cron.schedule("0 2 * * *", async () => {
+    try {
+      console.log("[cleanup] starting archive cleanup");
+      const result = await cleanupArchivedCampaigns();
+      if (result && result.modifiedCount > 0) {
+        console.log(
+          `[cleanup] marked ${result.modifiedCount} campaigns as eligible for deletion`
+        );
+      } else {
+        console.log("[cleanup] no campaigns marked for deletion");
+      }
+    } catch (e) {
+      console.error("[cleanup] archive cleanup failed", e.message);
+    }
+  });
+
+  console.log("[sync] workers initialized");
 };

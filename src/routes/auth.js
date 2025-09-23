@@ -43,4 +43,32 @@ router.post("/login", async (req, res) => {
   }
 });
 
+// Register Admin (for testing purposes)
+router.post("/register-admin", async (req, res) => {
+  try {
+    const { email, password, firstName, lastName, dob } = req.body;
+    const exists = await User.findOne({ email });
+    if (exists)
+      return res.status(400).json({ error: "Email already registered" });
+    const user = new User({
+      email,
+      password,
+      firstName,
+      lastName,
+      dob,
+      role: "admin", // Set role as admin
+    });
+    await user.save();
+    // Generate JWT token after registration
+    const token = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+    res.json({ token, message: "Admin user created successfully" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
