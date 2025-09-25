@@ -9,17 +9,17 @@ const router = express.Router();
 
 // Create campaign -> siteAdd
 router.post("/", auth(), async (req, res) => {
-  logger.campaign("Campaign creation started", { 
-    userId: req.user.id, 
+  logger.campaign("Campaign creation started", {
+    userId: req.user.id,
     vendor: req.body.vendor || "sparkTraffic",
-    url: req.body.url
+    url: req.body.url,
   });
-  
+
   try {
     const userId = req.user.id;
     const body = req.body;
     const vendorName = body.vendor || "sparkTraffic";
-    
+
     const vendor = vendors[vendorName];
     if (!vendor) {
       logger.error("Invalid vendor", { userId, vendor: vendorName });
@@ -41,11 +41,11 @@ router.post("/", auth(), async (req, res) => {
 
     const requiredHits = body.maxHits || 5;
     if (user.availableHits < requiredHits) {
-      logger.warn("Insufficient hits", { 
-        userId, 
-        userEmail: user.email, 
-        required: requiredHits, 
-        available: user.availableHits 
+      logger.warn("Insufficient hits", {
+        userId,
+        userEmail: user.email,
+        required: requiredHits,
+        available: user.availableHits,
       });
       return res.status(400).json({
         error: "Insufficient hits",
@@ -116,13 +116,13 @@ router.post("/", auth(), async (req, res) => {
         rss_feed: merged.rss_feed || "",
         ga_id: merged.ga_id || "",
       };
-      
+
       try {
         const vendorResp = await vendor.createProject(sparkPayload);
-        logger.campaign("SparkTraffic campaign created", { 
-          userId, 
+        logger.campaign("SparkTraffic campaign created", {
+          userId,
           projectId: vendorResp["new-id"] || vendorResp.id,
-          title: sparkPayload.title
+          title: sparkPayload.title,
         });
 
         // Immediately resume the campaign if it was created in paused state
@@ -147,7 +147,8 @@ router.post("/", auth(), async (req, res) => {
           }
         }
         // Save to DB
-        const projectId = vendorResp["new-id"] || vendorResp.id || vendorResp.project_id;
+        const projectId =
+          vendorResp["new-id"] || vendorResp.id || vendorResp.project_id;
         const camp = new Campaign({
           user: userId,
           title: sparkPayload.title,
@@ -164,19 +165,19 @@ router.post("/", auth(), async (req, res) => {
           metadata: body.metadata,
           spark_traffic_data: vendorResp,
         });
-        
+
         await camp.save();
 
         // Deduct hits from user after successful campaign creation
         user.availableHits -= requiredHits;
         await user.save();
-        
-        logger.campaign("Campaign created successfully", { 
-          userId, 
+
+        logger.campaign("Campaign created successfully", {
+          userId,
           campaignId: camp._id,
           sparkTrafficProjectId: projectId,
           hitsDeducted: requiredHits,
-          remainingHits: user.availableHits
+          remainingHits: user.availableHits,
         });
 
         return res.json({
@@ -191,10 +192,10 @@ router.post("/", auth(), async (req, res) => {
           },
         });
       } catch (err) {
-        logger.error("SparkTraffic campaign creation failed", { 
-          userId, 
-          error: err.message, 
-          stack: err.stack 
+        logger.error("SparkTraffic campaign creation failed", {
+          userId,
+          error: err.message,
+          stack: err.stack,
         });
         return res.status(500).json({ error: err.message });
       }
@@ -300,46 +301,99 @@ router.post("/", auth(), async (req, res) => {
 
 // Get campaign
 router.get("/:id", auth(), async (req, res) => {
-  
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
-      logger.warn("Campaign not found", { userId: req.user.id, campaignId: req.params.id });
+      logger.warn("Campaign not found", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
       return res.status(404).json({ error: "Not found" });
     }
-    
+
     if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
-      logger.warn("Unauthorized campaign access attempt", { 
-        userId: req.user.id, 
+      logger.warn("Unauthorized campaign access attempt", {
+        userId: req.user.id,
         campaignId: req.params.id,
         campaignOwner: c.user.toString(),
-        userRole: req.user.role 
+        userRole: req.user.role,
       });
       return res.status(403).json({ error: "Forbidden" });
     }
 
     // Don't allow access to archived campaigns unless specifically requested
     if (c.is_archived && !req.query.include_archived) {
-      logger.warn("Archived campaign access without flag", { 
-        userId: req.user.id, 
-        campaignId: req.params.id 
+      logger.warn("Archived campaign access without flag", {
+        userId: req.user.id,
+        campaignId: req.params.id,
       });
       return res.status(404).json({ error: "Campaign not found" });
     }
 
     // Fetch vendor stats if possible
     let vendorStats = null;
+
+    // Fetch SparkTraffic stats
+    if (c.spark_traffic_project_id) {
+      try {
+        const axios = require("axios");
+        const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+
+        // Try to get specific project stats directly
+        const statsResp = await axios.post(
+          "https://v2.sparktraffic.com/get-website-traffic-project",
+          {
+            id: c.spark_traffic_project_id,
+          },
+          {
+            headers: {
+              "Content-Type": "application/json",
+              API_KEY,
+            },
+          }
+        );
+
+        if (statsResp.data) {
+          vendorStats = {
+            ...statsResp.data,
+            speed: statsResp.data.speed || (c.state === "paused" ? 0 : 200),
+          };
+        } else {
+          vendorStats = {
+            error: "No data returned from SparkTraffic",
+            response: statsResp.data,
+          };
+        }
+      } catch (err) {
+        logger.error("Failed to fetch SparkTraffic vendor stats", {
+          userId: req.user.id,
+          campaignId: req.params.id,
+          sparkTrafficProjectId: c.spark_traffic_project_id,
+          error: err.message,
+          status: err.response?.status,
+          responseData: err.response?.data,
+        });
+        vendorStats = {
+          error: "Failed to fetch vendor stats",
+          details: err.message,
+          status: err.response?.status,
+          apiResponse: err.response?.data,
+        };
+      }
+    }
+
+    // Fetch 9Hits stats
     if (c.nine_hits_campaign_id) {
       try {
         const nine = require("../services/nineHits");
         const statsResp = await nine.siteGet({ id: c.nine_hits_campaign_id });
         vendorStats = statsResp;
       } catch (err) {
-        logger.error("Failed to fetch 9Hits vendor stats", { 
-          userId: req.user.id, 
+        logger.error("Failed to fetch 9Hits vendor stats", {
+          userId: req.user.id,
           campaignId: req.params.id,
           nineHitsId: c.nine_hits_campaign_id,
-          error: err.message 
+          error: err.message,
         });
         vendorStats = {
           error: "Failed to fetch vendor stats",
@@ -347,14 +401,14 @@ router.get("/:id", auth(), async (req, res) => {
         };
       }
     }
-    
+
     res.json({ ...c.toObject(), vendorStats });
   } catch (err) {
-    logger.error("Get campaign failed", { 
-      userId: req.user.id, 
+    logger.error("Get campaign failed", {
+      userId: req.user.id,
       campaignId: req.params.id,
-      error: err.message, 
-      stack: err.stack 
+      error: err.message,
+      stack: err.stack,
     });
     res.status(500).json({ error: err.message });
   }
@@ -362,36 +416,36 @@ router.get("/:id", auth(), async (req, res) => {
 
 // Pause campaign
 router.post("/:id/pause", auth(), async (req, res) => {
-  
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
-      logger.warn("Campaign not found for pause", { userId: req.user.id, campaignId: req.params.id });
+      logger.warn("Campaign not found for pause", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
       return res.status(404).json({ error: "Not found" });
     }
-    
+
     if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
-      logger.warn("Unauthorized pause attempt", { 
-        userId: req.user.id, 
+      logger.warn("Unauthorized pause attempt", {
+        userId: req.user.id,
         campaignId: req.params.id,
-        campaignOwner: c.user.toString() 
+        campaignOwner: c.user.toString(),
       });
       return res.status(403).json({ error: "Forbidden" });
     }
 
-
     let vendorResp = null;
     if (c.spark_traffic_project_id) {
       try {
-        // Pause by setting speed to 0
+        // Pause by setting speed to 0 using modify-website-traffic-project endpoint
         const axios = require("axios");
         const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
         vendorResp = await axios.post(
-          "https://v2.sparktraffic.com/edit-website-traffic-project",
+          "https://v2.sparktraffic.com/modify-website-traffic-project",
           {
-            id: c.spark_traffic_project_id,
+            unique_id: c.spark_traffic_project_id,
             speed: 0,
-            size: "eco",
           },
           {
             headers: {
@@ -403,7 +457,7 @@ router.post("/:id/pause", auth(), async (req, res) => {
         logger.campaign("Campaign paused", {
           userId: req.user.id,
           campaignId: c._id,
-          vendor: "sparkTraffic"
+          vendor: "sparkTraffic",
         });
       } catch (err) {
         logger.error("SparkTraffic pause failed", {
@@ -411,19 +465,23 @@ router.post("/:id/pause", auth(), async (req, res) => {
           campaignId: c._id,
           sparkTrafficProjectId: c.spark_traffic_project_id,
           error: err.message,
-          status: err.response?.status
+          status: err.response?.status,
         });
         vendorResp = { error: err.message };
       }
-      
+
       c.state = "paused";
       await c.save();
-      
+
       return res.json({
         ok: true,
         campaign: c,
         vendorResp:
-          vendorResp && vendorResp.data ? vendorResp.data : vendorResp,
+          vendorResp && vendorResp.data
+            ? vendorResp.data
+            : vendorResp && vendorResp.error
+            ? { error: vendorResp.error }
+            : vendorResp,
       });
     }
     // Handle 9Hits campaigns
@@ -432,42 +490,42 @@ router.post("/:id/pause", auth(), async (req, res) => {
       logger.campaign("Pausing 9Hits campaign", {
         userId: req.user.id,
         campaignId: c._id,
-        nineHitsId: c.nine_hits_campaign_id
+        nineHitsId: c.nine_hits_campaign_id,
       });
-      
+
       try {
         const nine = require("../services/nineHits");
         nineResp = await nine.sitePause({ id: c.nine_hits_campaign_id });
         logger.campaign("9Hits pause API call successful", {
           userId: req.user.id,
           campaignId: c._id,
-          response: nineResp
+          response: nineResp,
         });
       } catch (err) {
         logger.error("9Hits pause API call failed", {
           userId: req.user.id,
           campaignId: c._id,
           nineHitsId: c.nine_hits_campaign_id,
-          error: err.message
+          error: err.message,
         });
         nineResp = { error: err.message };
       }
-      
+
       c.state = "paused";
       await c.save();
-      
+
       logger.campaign("Campaign paused successfully", {
         userId: req.user.id,
         campaignId: c._id,
-        vendor: "9Hits"
+        vendor: "9Hits",
       });
-      
+
       return res.json({ ok: true, campaign: c, vendorResp: nineResp });
     }
-    
+
     logger.warn("No vendor campaign ID found for pause", {
       userId: req.user.id,
-      campaignId: c._id
+      campaignId: c._id,
     });
     res.status(400).json({ error: "No vendor campaign id found" });
   } catch (err) {
@@ -475,7 +533,7 @@ router.post("/:id/pause", auth(), async (req, res) => {
       userId: req.user.id,
       campaignId: req.params.id,
       error: err.message,
-      stack: err.stack
+      stack: err.stack,
     });
     res.status(500).json({ error: err.message });
   }
@@ -483,19 +541,21 @@ router.post("/:id/pause", auth(), async (req, res) => {
 
 // Resume campaign
 router.post("/:id/resume", auth(), async (req, res) => {
-  
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
-      logger.warn("Campaign not found for resume", { userId: req.user.id, campaignId: req.params.id });
+      logger.warn("Campaign not found for resume", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
       return res.status(404).json({ error: "Not found" });
     }
-    
+
     if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
-      logger.warn("Unauthorized resume attempt", { 
-        userId: req.user.id, 
+      logger.warn("Unauthorized resume attempt", {
+        userId: req.user.id,
         campaignId: req.params.id,
-        campaignOwner: c.user.toString() 
+        campaignOwner: c.user.toString(),
       });
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -506,19 +566,18 @@ router.post("/:id/resume", auth(), async (req, res) => {
       logger.campaign("Resuming SparkTraffic campaign", {
         userId: req.user.id,
         campaignId: c._id,
-        sparkTrafficProjectId: c.spark_traffic_project_id
+        sparkTrafficProjectId: c.spark_traffic_project_id,
       });
-      
+
       try {
-        // Resume by setting speed to 100 (or any positive value)
+        // Resume by setting speed to 200 using modify-website-traffic-project endpoint
         const axios = require("axios");
         const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
         vendorResp = await axios.post(
-          "https://v2.sparktraffic.com/edit-website-traffic-project",
+          "https://v2.sparktraffic.com/modify-website-traffic-project",
           {
-            id: c.spark_traffic_project_id,
+            unique_id: c.spark_traffic_project_id,
             speed: 200,
-            size: "eco",
           },
           {
             headers: {
@@ -531,35 +590,39 @@ router.post("/:id/resume", auth(), async (req, res) => {
         logger.error("SparkTraffic resume failed", {
           userId: req.user.id,
           campaignId: c._id,
-          error: err.message
+          error: err.message,
         });
         vendorResp = { error: err.message };
       }
-      
+
       c.state = "ok";
       c.userState = "running";
       await c.save();
-      
+
       logger.campaign("Campaign resumed", {
         userId: req.user.id,
         campaignId: c._id,
-        vendor: "sparkTraffic"
+        vendor: "sparkTraffic",
       });
-      
+
       return res.json({
         ok: true,
         campaign: c,
         vendorResp:
-          vendorResp && vendorResp.data ? vendorResp.data : vendorResp,
+          vendorResp && vendorResp.data
+            ? vendorResp.data
+            : vendorResp && vendorResp.error
+            ? { error: vendorResp.error }
+            : vendorResp,
       });
     }
     if (c.nine_hits_campaign_id) {
       logger.campaign("Resuming 9Hits campaign", {
         userId: req.user.id,
         campaignId: c._id,
-        nineHitsId: c.nine_hits_campaign_id
+        nineHitsId: c.nine_hits_campaign_id,
       });
-      
+
       try {
         const nine = require("../services/nineHits");
         vendorResp = await nine.siteUpdate({
@@ -569,56 +632,58 @@ router.post("/:id/resume", auth(), async (req, res) => {
         logger.campaign("9Hits resume API call successful", {
           userId: req.user.id,
           campaignId: c._id,
-          response: vendorResp
+          response: vendorResp,
         });
       } catch (err) {
         logger.error("9Hits resume API call failed", {
           userId: req.user.id,
           campaignId: c._id,
           nineHitsId: c.nine_hits_campaign_id,
-          error: err.message
+          error: err.message,
         });
         vendorResp = { error: err.message };
       }
     }
-    
+
     c.state = "ok";
     c.userState = "running";
     await c.save();
-    
+
     logger.campaign("Campaign resumed successfully", {
       userId: req.user.id,
       campaignId: c._id,
-      vendor: c.nine_hits_campaign_id ? "9Hits" : "unknown"
+      vendor: c.nine_hits_campaign_id ? "9Hits" : "unknown",
     });
-    
+
     res.json({ ok: true, campaign: c, vendorResp });
   } catch (err) {
     logger.error("Campaign resume failed", {
       userId: req.user.id,
       campaignId: req.params.id,
       error: err.message,
-      stack: err.stack
+      stack: err.stack,
     });
     res.status(500).json({ error: err.message });
   }
 });
 
-// Update campaign
-router.put("/:id", auth(), async (req, res) => {
-  
+// Update campaign (POST method following SparkTraffic documentation)
+router.post("/:id/modify", auth(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
-      logger.warn("Campaign not found for update", { userId: req.user.id, campaignId: req.params.id });
+      logger.warn("Campaign not found for modify", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
       return res.status(404).json({ error: "Not found" });
     }
-    
+
     if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
-      logger.warn("Unauthorized update attempt", { 
-        userId: req.user.id, 
+      logger.warn("Unauthorized modify attempt", {
+        userId: req.user.id,
         campaignId: req.params.id,
-        campaignOwner: c.user.toString() 
+        campaignOwner: c.user.toString(),
       });
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -642,14 +707,127 @@ router.put("/:id", auth(), async (req, res) => {
 
     // Update on vendor if possible
     let vendorResp = null;
+
+    // Handle SparkTraffic campaigns
+    if (c.spark_traffic_project_id) {
+      logger.campaign("Modifying SparkTraffic campaign", {
+        userId: req.user.id,
+        campaignId: c._id,
+        sparkTrafficProjectId: c.spark_traffic_project_id,
+        updateData: req.body,
+      });
+
+      try {
+        const axios = require("axios");
+        const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+
+        // Build SparkTraffic modify payload following exact documentation format
+        const modifyPayload = {
+          unique_id: c.spark_traffic_project_id, // Required parameter
+        };
+
+        // Map fields exactly as per SparkTraffic documentation
+        if (req.body.created_at !== undefined)
+          modifyPayload.created_at = req.body.created_at;
+        if (req.body.expires_at !== undefined)
+          modifyPayload.expires_at = req.body.expires_at;
+        if (req.body.title) modifyPayload.title = req.body.title;
+        if (req.body.size) modifyPayload.size = req.body.size;
+        if (req.body.multiplier !== undefined)
+          modifyPayload.multiplier = req.body.multiplier;
+        if (req.body.speed !== undefined) modifyPayload.speed = req.body.speed;
+
+        // Handle URLs - support both formats
+        if (req.body["urls-1"]) modifyPayload["urls-1"] = req.body["urls-1"];
+        if (req.body["urls-2"]) modifyPayload["urls-2"] = req.body["urls-2"];
+        if (req.body["urls-3"]) modifyPayload["urls-3"] = req.body["urls-3"];
+        if (req.body["urls-4"]) modifyPayload["urls-4"] = req.body["urls-4"];
+        if (req.body["urls-5"]) modifyPayload["urls-5"] = req.body["urls-5"];
+        if (req.body["urls-6"]) modifyPayload["urls-6"] = req.body["urls-6"];
+        if (req.body["urls-7"]) modifyPayload["urls-7"] = req.body["urls-7"];
+        if (req.body["urls-8"]) modifyPayload["urls-8"] = req.body["urls-8"];
+        if (req.body["urls-9"]) modifyPayload["urls-9"] = req.body["urls-9"];
+        if (req.body["urls-10"]) modifyPayload["urls-10"] = req.body["urls-10"];
+        if (req.body["urls-11"]) modifyPayload["urls-11"] = req.body["urls-11"];
+
+        // Handle URL mapping from simplified format
+        if (req.body.url) modifyPayload["urls-1"] = req.body.url;
+        if (req.body.urls) {
+          req.body.urls.forEach((url, index) => {
+            if (index < 11 && url) {
+              modifyPayload[`urls-${index + 1}`] = url;
+            }
+          });
+        }
+
+        if (req.body.traffic_type)
+          modifyPayload.traffic_type = req.body.traffic_type;
+        if (req.body.keywords) modifyPayload.keywords = req.body.keywords;
+        if (req.body.referrers) modifyPayload.referrers = req.body.referrers;
+        if (req.body.social_links)
+          modifyPayload.social_links = req.body.social_links;
+        if (req.body.languages) modifyPayload.languages = req.body.languages;
+        if (req.body.bounce_rate !== undefined)
+          modifyPayload.bounce_rate = req.body.bounce_rate;
+        if (req.body.return_rate !== undefined)
+          modifyPayload.return_rate = req.body.return_rate;
+        if (req.body.click_outbound_events !== undefined)
+          modifyPayload.click_outbound_events = req.body.click_outbound_events;
+        if (req.body.form_submit_events !== undefined)
+          modifyPayload.form_submit_events = req.body.form_submit_events;
+        if (req.body.scroll_events !== undefined)
+          modifyPayload.scroll_events = req.body.scroll_events;
+        if (req.body.time_on_page)
+          modifyPayload.time_on_page = req.body.time_on_page;
+        if (req.body.desktop_rate !== undefined)
+          modifyPayload.desktop_rate = req.body.desktop_rate;
+        if (req.body.auto_renew) modifyPayload.auto_renew = req.body.auto_renew;
+        if (req.body.geo_type) modifyPayload.geo_type = req.body.geo_type;
+        if (req.body.geo) modifyPayload.geo = req.body.geo;
+        if (req.body.shortener) modifyPayload.shortener = req.body.shortener;
+        if (req.body.rss_feed) modifyPayload.rss_feed = req.body.rss_feed;
+        if (req.body.ga_id) modifyPayload.ga_id = req.body.ga_id;
+
+        // Call SparkTraffic modify endpoint
+        vendorResp = await axios.post(
+          "https://v2.sparktraffic.com/modify-website-traffic-project",
+          modifyPayload,
+          {
+            headers: {
+              "Content-Type": "application/json",
+              API_KEY,
+            },
+          }
+        );
+
+        logger.campaign("SparkTraffic campaign modified successfully", {
+          userId: req.user.id,
+          campaignId: c._id,
+          sparkTrafficProjectId: c.spark_traffic_project_id,
+          modifyPayload,
+        });
+      } catch (err) {
+        logger.error("SparkTraffic modify API call failed", {
+          userId: req.user.id,
+          campaignId: c._id,
+          sparkTrafficProjectId: c.spark_traffic_project_id,
+          error: err.message,
+          status: err.response?.status,
+          responseData: err.response?.data,
+        });
+        vendorResp = { error: err.message };
+      }
+    }
+
+    // Handle 9Hits campaigns
     if (c.nine_hits_campaign_id) {
-      logger.campaign("Updating 9Hits campaign", {
+      logger.campaign("Modifying 9Hits campaign", {
         userId: req.user.id,
         campaignId: c._id,
         nineHitsId: c.nine_hits_campaign_id,
-        updateData: req.body
+        updateData: req.body,
       });
-      
+
       try {
         const nine = require("../services/nineHits");
         vendorResp = await nine.siteUpdate({
@@ -657,30 +835,51 @@ router.put("/:id", auth(), async (req, res) => {
           ...req.body,
         });
       } catch (err) {
-        logger.error("9Hits update API call failed", {
+        logger.error("9Hits modify API call failed", {
           userId: req.user.id,
           campaignId: c._id,
           nineHitsId: c.nine_hits_campaign_id,
-          error: err.message
+          error: err.message,
         });
         vendorResp = { error: err.message };
       }
     }
-    
+
     await c.save();
-    
-    logger.campaign("Campaign updated", {
+
+    logger.campaign("Campaign modified", {
       userId: req.user.id,
-      campaignId: c._id
+      campaignId: c._id,
     });
-    
-    res.json({ ok: true, campaign: c, vendorResp });
+
+    // Clean vendor response to avoid circular reference issues
+    const cleanVendorResp =
+      vendorResp && vendorResp.data
+        ? vendorResp.data
+        : vendorResp && vendorResp.error
+        ? { error: vendorResp.error }
+        : vendorResp;
+
+    // Return response matching SparkTraffic format
+    if (cleanVendorResp && cleanVendorResp.status === "ok") {
+      res.json({
+        status: "ok",
+        campaign: c,
+        vendorResp: cleanVendorResp,
+      });
+    } else {
+      res.json({
+        ok: true,
+        campaign: c,
+        vendorResp: cleanVendorResp,
+      });
+    }
   } catch (err) {
-    logger.error("Campaign update failed", {
+    logger.error("Campaign modify failed", {
       userId: req.user.id,
       campaignId: req.params.id,
       error: err.message,
-      stack: err.stack
+      stack: err.stack,
     });
     res.status(500).json({ error: err.message });
   }
@@ -688,19 +887,21 @@ router.put("/:id", auth(), async (req, res) => {
 
 // Archive campaign (soft delete)
 router.delete("/:id", auth(), async (req, res) => {
-  
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
-      logger.warn("Campaign not found for archive", { userId: req.user.id, campaignId: req.params.id });
+      logger.warn("Campaign not found for archive", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
       return res.status(404).json({ error: "Not found" });
     }
-    
+
     if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
-      logger.warn("Unauthorized archive attempt", { 
-        userId: req.user.id, 
+      logger.warn("Unauthorized archive attempt", {
+        userId: req.user.id,
         campaignId: req.params.id,
-        campaignOwner: c.user.toString() 
+        campaignOwner: c.user.toString(),
       });
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -709,12 +910,12 @@ router.delete("/:id", auth(), async (req, res) => {
     if (c.is_archived && c.delete_eligible) {
       // Permanently delete the campaign
       await c.deleteOne();
-      
+
       logger.campaign("Campaign permanently deleted", {
         userId: req.user.id,
-        campaignId: c._id
+        campaignId: c._id,
       });
-      
+
       return res.json({
         ok: true,
         message: "Campaign permanently deleted",
@@ -731,11 +932,10 @@ router.delete("/:id", auth(), async (req, res) => {
         const axios = require("axios");
         const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
         vendorResp = await axios.post(
-          "https://v2.sparktraffic.com/edit-website-traffic-project",
+          "https://v2.sparktraffic.com/modify-website-traffic-project",
           {
-            id: c.spark_traffic_project_id,
+            unique_id: c.spark_traffic_project_id,
             speed: 0,
-            size: "eco",
           },
           {
             headers: {
@@ -744,8 +944,25 @@ router.delete("/:id", auth(), async (req, res) => {
             },
           }
         );
+        logger.campaign("Campaign archived on SparkTraffic", {
+          userId: req.user.id,
+          campaignId: c._id,
+          vendor: "sparkTraffic",
+        });
       } catch (err) {
-        vendorResp = { error: err.message };
+        logger.error("SparkTraffic archive failed", {
+          userId: req.user.id,
+          campaignId: c._id,
+          sparkTrafficProjectId: c.spark_traffic_project_id,
+          error: err.message,
+          status: err.response?.status,
+          responseData: err.response?.data,
+        });
+        vendorResp = {
+          error: err.message,
+          status: err.response?.status,
+          apiResponse: err.response?.data,
+        };
       }
     }
 
@@ -764,10 +981,10 @@ router.delete("/:id", auth(), async (req, res) => {
     c.archived_at = new Date();
     c.state = "archived";
     await c.save();
-    
+
     logger.campaign("Campaign archived", {
       userId: req.user.id,
-      campaignId: c._id
+      campaignId: c._id,
     });
 
     res.json({
@@ -775,7 +992,12 @@ router.delete("/:id", auth(), async (req, res) => {
       message:
         "Campaign archived successfully. Will be permanently deleted after 7 days.",
       campaign: c,
-      vendorResp: vendorResp && vendorResp.data ? vendorResp.data : vendorResp,
+      vendorResp:
+        vendorResp && vendorResp.data
+          ? vendorResp.data
+          : vendorResp && vendorResp.error
+          ? { error: vendorResp.error }
+          : vendorResp,
       action: "archived",
     });
   } catch (err) {
@@ -783,7 +1005,7 @@ router.delete("/:id", auth(), async (req, res) => {
       userId: req.user.id,
       campaignId: req.params.id,
       error: err.message,
-      stack: err.stack
+      stack: err.stack,
     });
     res.status(500).json({ error: err.message });
   }
@@ -791,19 +1013,21 @@ router.delete("/:id", auth(), async (req, res) => {
 
 // Restore archived campaign
 router.post("/:id/restore", auth(), async (req, res) => {
-  
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
-      logger.warn("Campaign not found for restore", { userId: req.user.id, campaignId: req.params.id });
+      logger.warn("Campaign not found for restore", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
       return res.status(404).json({ error: "Not found" });
     }
-    
+
     if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
-      logger.warn("Unauthorized restore attempt", { 
-        userId: req.user.id, 
+      logger.warn("Unauthorized restore attempt", {
+        userId: req.user.id,
         campaignId: req.params.id,
-        campaignOwner: c.user.toString() 
+        campaignOwner: c.user.toString(),
       });
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -813,11 +1037,9 @@ router.post("/:id/restore", auth(), async (req, res) => {
     }
 
     if (c.delete_eligible) {
-      return res
-        .status(400)
-        .json({
-          error: "Campaign is eligible for deletion and cannot be restored",
-        });
+      return res.status(400).json({
+        error: "Campaign is eligible for deletion and cannot be restored",
+      });
     }
 
     // Restore the campaign
@@ -825,10 +1047,10 @@ router.post("/:id/restore", auth(), async (req, res) => {
     c.archived_at = null;
     c.state = "paused"; // Restore in paused state for safety
     await c.save();
-    
+
     logger.campaign("Campaign restored", {
       userId: req.user.id,
-      campaignId: c._id
+      campaignId: c._id,
     });
 
     res.json({
@@ -843,7 +1065,7 @@ router.post("/:id/restore", auth(), async (req, res) => {
       userId: req.user.id,
       campaignId: req.params.id,
       error: err.message,
-      stack: err.stack
+      stack: err.stack,
     });
     res.status(500).json({ error: err.message });
   }
@@ -866,7 +1088,7 @@ router.get("/archived", auth(), async (req, res) => {
     logger.error("Get archived campaigns failed", {
       userId: req.user.id,
       error: err.message,
-      stack: err.stack
+      stack: err.stack,
     });
     res.status(500).json({ error: err.message });
   }
@@ -898,7 +1120,7 @@ router.get("/user/stats", auth(), async (req, res) => {
     logger.error("Get user stats failed", {
       userId: req.user.id,
       error: err.message,
-      stack: err.stack
+      stack: err.stack,
     });
     res.status(500).json({ error: err.message });
   }
@@ -906,14 +1128,13 @@ router.get("/user/stats", auth(), async (req, res) => {
 
 // Add credits to user (admin only)
 router.post("/user/:userId/add-credits", auth("admin"), async (req, res) => {
-  
   try {
     const { credits } = req.body;
     if (!credits || credits <= 0) {
       logger.warn("Invalid credits amount", {
         adminId: req.user.id,
         targetUserId: req.params.userId,
-        credits
+        credits,
       });
       return res.status(400).json({ error: "Invalid credits amount" });
     }
@@ -922,7 +1143,7 @@ router.post("/user/:userId/add-credits", auth("admin"), async (req, res) => {
     if (!user) {
       logger.warn("User not found for credit addition", {
         adminId: req.user.id,
-        targetUserId: req.params.userId
+        targetUserId: req.params.userId,
       });
       return res.status(404).json({ error: "User not found" });
     }
@@ -930,17 +1151,17 @@ router.post("/user/:userId/add-credits", auth("admin"), async (req, res) => {
     const oldCredits = user.credits;
     const oldHits = user.availableHits;
     const hitsToAdd = Math.floor(credits / 3);
-    
+
     user.credits += credits;
     user.availableHits += hitsToAdd;
     await user.save();
-    
+
     logger.campaign("Credits added", {
       adminId: req.user.id,
       targetUserId: req.params.userId,
       userEmail: user.email,
       creditsAdded: credits,
-      hitsAdded: hitsToAdd
+      hitsAdded: hitsToAdd,
     });
 
     res.json({
@@ -958,7 +1179,7 @@ router.post("/user/:userId/add-credits", auth("admin"), async (req, res) => {
       adminId: req.user.id,
       targetUserId: req.params.userId,
       error: err.message,
-      stack: err.stack
+      stack: err.stack,
     });
     res.status(500).json({ error: err.message });
   }

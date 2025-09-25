@@ -15,15 +15,41 @@
  *           schema:
  *             $ref: '#/components/schemas/CreateCampaignRequest'
  *           examples:
- *             sparkTraffic:
- *               summary: SparkTraffic campaign
+ *             sparkTraffic_basic:
+ *               summary: Basic SparkTraffic campaign
  *               value:
  *                 vendor: "sparkTraffic"
- *                 url: "https://example.com"
- *                 title: "My SparkTraffic Campaign"
+ *                 url: "https://trafficboxes.com"
+ *                 title: "trafficboxes"
  *                 maxHits: 10
  *                 is_adult: false
  *                 is_coin_mining: false
+ *             sparkTraffic_advanced:
+ *               summary: Advanced SparkTraffic campaign with full configuration
+ *               value:
+ *                 url: "trafficboxes.com"
+ *                 title: "trafficboxes"
+ *                 urls: ["https://trafficboxes.com"]
+ *                 keywords: "test,traffic"
+ *                 referrers:
+ *                   mode: "basic"
+ *                   urls: ["https://ref.com"]
+ *                 languages: "en"
+ *                 bounce_rate: 0
+ *                 return_rate: 0
+ *                 click_outbound_events: 0
+ *                 form_submit_events: 0
+ *                 scroll_events: 0
+ *                 time_on_page: "2sec"
+ *                 desktop_rate: 2
+ *                 auto_renew: "true"
+ *                 geo_type: "countries"
+ *                 geo: "US"
+ *                 shortener: ""
+ *                 rss_feed: ""
+ *                 ga_id: ""
+ *                 size: "eco"
+ *                 speed: 200
  *             nineHits:
  *               summary: 9Hits campaign
  *               value:
@@ -33,7 +59,7 @@
  *                 maxHits: 5
  *                 duration: [5, 15]
  *     responses:
- *       201:
+ *       200:
  *         description: Campaign created successfully
  *         content:
  *           application/json:
@@ -45,9 +71,72 @@
  *                   example: true
  *                 campaign:
  *                   $ref: '#/components/schemas/Campaign'
- *                 vendorResp:
+ *                 vendorRaw:
  *                   type: object
- *                   description: Response from the vendor API
+ *                   description: Raw response from SparkTraffic API
+ *                   properties:
+ *                     new-id:
+ *                       type: string
+ *                       description: SparkTraffic project ID
+ *                       example: "3252C8DA071E"
+ *                 resumeRaw:
+ *                   type: object
+ *                   description: Response from auto-resume attempt after campaign creation
+ *                   oneOf:
+ *                     - type: object
+ *                       properties:
+ *                         status:
+ *                           type: string
+ *                           example: "ok"
+ *                     - type: object
+ *                       properties:
+ *                         error:
+ *                           type: string
+ *                           example: "Request failed with status code 404"
+ *                 userStats:
+ *                   type: object
+ *                   properties:
+ *                     hitsDeducted:
+ *                       type: number
+ *                       description: Number of hits deducted from user's balance
+ *                       example: 5
+ *                     remainingHits:
+ *                       type: number
+ *                       description: User's remaining available hits
+ *                       example: 1646
+ *             examples:
+ *               successful_creation:
+ *                 summary: Successful campaign creation with SparkTraffic
+ *                 value:
+ *                   ok: true
+ *                   campaign:
+ *                     user: "68ce78a2d1017aa5b1da3e6a"
+ *                     title: "trafficboxes"
+ *                     urls: ["https://trafficboxes.com"]
+ *                     duration_min: 5
+ *                     duration_max: 15
+ *                     countries: []
+ *                     rule: "any"
+ *                     macros: ""
+ *                     is_adult: false
+ *                     is_coin_mining: false
+ *                     state: "created"
+ *                     spark_traffic_project_id: "3252C8DA071E"
+ *                     spark_traffic_data:
+ *                       new-id: "3252C8DA071E"
+ *                     is_archived: false
+ *                     delete_eligible: false
+ *                     _id: "68d593b3b793dbe7779b73b4"
+ *                     createdAt: "2025-09-25T19:10:43.467Z"
+ *                     updatedAt: "2025-09-25T19:10:43.467Z"
+ *                     __v: 0
+ *                   vendorRaw:
+ *                     new-id: "3252C8DA071E"
+ *                   resumeRaw:
+ *                     error: "Request failed with status code 404"
+ *                   userStats:
+ *                     hitsDeducted: 5
+ *                     remainingHits: 1646
  *       400:
  *         description: Bad request (invalid URL, insufficient hits, etc.)
  *         content:
@@ -192,7 +281,7 @@
  *     tags:
  *       - Campaigns
  *     summary: Archive campaign (soft delete)
- *     description: Archive a campaign instead of permanently deleting it. Sets speed=0 on SparkTraffic or pauses on 9Hits. Provides 7-day restoration period.
+ *     description: Archive a campaign using SparkTraffic modify-website-traffic-project API (speed=0) or 9Hits pause API. Campaign is soft-deleted with 7-day restoration period. If called again on already archived campaign that's delete_eligible, performs permanent deletion.
  *     security:
  *       - BearerAuth: []
  *     parameters:
@@ -202,6 +291,7 @@
  *         schema:
  *           type: string
  *         description: Campaign ID
+ *         example: "68d580f36550b230cd374d43"
  *     responses:
  *       200:
  *         description: Campaign archived successfully or permanently deleted if eligible
@@ -220,11 +310,36 @@
  *                   $ref: '#/components/schemas/Campaign'
  *                 vendorResp:
  *                   type: object
- *                   description: Response from vendor API
+ *                   description: Response from SparkTraffic or 9Hits API
+ *                   example:
+ *                     status: "ok"
  *                 action:
  *                   type: string
  *                   enum: ['archived', 'permanent_delete']
  *                   description: Action performed on the campaign
+ *                   example: "archived"
+ *             examples:
+ *               archived:
+ *                 summary: Campaign archived successfully
+ *                 value:
+ *                   ok: true
+ *                   message: "Campaign archived successfully. Will be permanently deleted after 7 days."
+ *                   campaign:
+ *                     _id: "68d580f36550b230cd374d43"
+ *                     title: "trafficboxes"
+ *                     state: "archived"
+ *                     is_archived: true
+ *                     archived_at: "2025-09-25T18:59:07.861Z"
+ *                     spark_traffic_project_id: "9B51FA9DCDEA"
+ *                   vendorResp:
+ *                     status: "ok"
+ *                   action: "archived"
+ *               permanent_delete:
+ *                 summary: Campaign permanently deleted
+ *                 value:
+ *                   ok: true
+ *                   message: "Campaign permanently deleted"
+ *                   action: "permanent_delete"
  *       404:
  *         description: Campaign not found
  *         content:
@@ -232,7 +347,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       403:
- *         description: Forbidden
+ *         description: Forbidden (not campaign owner or admin)
  *         content:
  *           application/json:
  *             schema:
@@ -252,7 +367,7 @@
  *     tags:
  *       - Campaigns
  *     summary: Pause campaign
- *     description: Pause a running campaign on the vendor platform
+ *     description: Pause a running or active campaign using SparkTraffic modify-website-traffic-project API (speed=0) or 9Hits sitePause API. Sets campaign state to "paused".
  *     security:
  *       - BearerAuth: []
  *     parameters:
@@ -262,6 +377,7 @@
  *         schema:
  *           type: string
  *         description: Campaign ID
+ *         example: "68d580f36550b230cd374d43"
  *     responses:
  *       200:
  *         description: Campaign paused successfully
@@ -273,13 +389,38 @@
  *                 ok:
  *                   type: boolean
  *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Campaign paused"
  *                 campaign:
  *                   $ref: '#/components/schemas/Campaign'
  *                 vendorResp:
  *                   type: object
+ *                   description: Response from SparkTraffic or 9Hits API
+ *                   example:
+ *                     status: "ok"
+ *             examples:
+ *               sparktraffic_success:
+ *                 summary: SparkTraffic campaign paused successfully
+ *                 value:
+ *                   ok: true
+ *                   campaign:
+ *                     _id: "68d580f36550b230cd374d43"
+ *                     title: "trafficboxes"
+ *                     state: "paused"
+ *                     is_archived: true
+ *                     spark_traffic_project_id: "9B51FA9DCDEA"
+ *                     urls: ["https://trafficboxes.com"]
+ *                   vendorResp:
+ *                     status: "ok"
+ *               ninehits_success:
+ *                 summary: 9Hits campaign paused successfully
+ *                 value:
+ *                   ok: true
+ *                   campaign:
+ *                     _id: "68d580f36550b230cd374d43"
+ *                     title: "My 9Hits Campaign"
+ *                     state: "paused"
+ *                     nine_hits_campaign_id: "12345"
+ *                   vendorResp:
+ *                     status: "success"
  *       404:
  *         description: Campaign not found
  *         content:
@@ -287,7 +428,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       403:
- *         description: Forbidden
+ *         description: Forbidden (not campaign owner or admin)
  *         content:
  *           application/json:
  *             schema:
@@ -307,7 +448,7 @@
  *     tags:
  *       - Campaigns
  *     summary: Resume campaign
- *     description: Resume a paused campaign on the vendor platform
+ *     description: Resume a paused or archived campaign using SparkTraffic modify-website-traffic-project API (speed=200) or 9Hits siteUpdate API. Sets campaign state to "ok" and userState to "running".
  *     security:
  *       - BearerAuth: []
  *     parameters:
@@ -317,6 +458,7 @@
  *         schema:
  *           type: string
  *         description: Campaign ID
+ *         example: "68d580f36550b230cd374d43"
  *     responses:
  *       200:
  *         description: Campaign resumed successfully
@@ -328,13 +470,40 @@
  *                 ok:
  *                   type: boolean
  *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Campaign resumed"
  *                 campaign:
  *                   $ref: '#/components/schemas/Campaign'
  *                 vendorResp:
  *                   type: object
+ *                   description: Response from SparkTraffic or 9Hits API
+ *                   example:
+ *                     status: "ok"
+ *             examples:
+ *               sparktraffic_success:
+ *                 summary: SparkTraffic campaign resumed successfully
+ *                 value:
+ *                   ok: true
+ *                   campaign:
+ *                     _id: "68d580f36550b230cd374d43"
+ *                     title: "trafficboxes"
+ *                     state: "ok"
+ *                     userState: "running"
+ *                     is_archived: true
+ *                     spark_traffic_project_id: "9B51FA9DCDEA"
+ *                     urls: ["https://trafficboxes.com"]
+ *                   vendorResp:
+ *                     status: "ok"
+ *               ninehits_success:
+ *                 summary: 9Hits campaign resumed successfully
+ *                 value:
+ *                   ok: true
+ *                   campaign:
+ *                     _id: "68d580f36550b230cd374d43"
+ *                     title: "My 9Hits Campaign"
+ *                     state: "ok"
+ *                     userState: "running"
+ *                     nine_hits_campaign_id: "12345"
+ *                   vendorResp:
+ *                     status: "success"
  *       404:
  *         description: Campaign not found
  *         content:
@@ -342,7 +511,7 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  *       403:
- *         description: Forbidden
+ *         description: Forbidden (not campaign owner or admin)
  *         content:
  *           application/json:
  *             schema:

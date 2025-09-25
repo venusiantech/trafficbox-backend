@@ -310,13 +310,127 @@ const swaggerDefinition = {
           url: {
             type: "string",
             format: "url",
-            example: "https://example.com",
+            example: "https://trafficboxes.com",
             description: "Target URL for the campaign",
           },
           title: {
             type: "string",
-            example: "My Campaign",
+            example: "trafficboxes",
             description: "Campaign title",
+          },
+          urls: {
+            type: "array",
+            items: {
+              type: "string",
+              format: "url",
+            },
+            example: ["https://trafficboxes.com"],
+            description: "Array of target URLs",
+          },
+          keywords: {
+            type: "string",
+            example: "test,traffic",
+            description: "Keywords separated by commas",
+          },
+          referrers: {
+            type: "object",
+            properties: {
+              mode: {
+                type: "string",
+                example: "basic",
+              },
+              urls: {
+                type: "array",
+                items: {
+                  type: "string",
+                  format: "url",
+                },
+                example: ["https://ref.com"],
+              },
+            },
+            description: "Referrer configuration",
+          },
+          languages: {
+            type: "string",
+            example: "en",
+            description: "Target languages",
+          },
+          bounce_rate: {
+            type: "number",
+            example: 0,
+            description: "Bounce rate percentage (0-100)",
+          },
+          return_rate: {
+            type: "number",
+            example: 0,
+            description: "Return rate percentage (0-100)",
+          },
+          click_outbound_events: {
+            type: "number",
+            example: 0,
+            description: "Click outbound events count",
+          },
+          form_submit_events: {
+            type: "number",
+            example: 0,
+            description: "Form submit events count",
+          },
+          scroll_events: {
+            type: "number",
+            example: 0,
+            description: "Scroll events count",
+          },
+          time_on_page: {
+            type: "string",
+            example: "2sec",
+            description: "Time spent on page (e.g., 2sec, 1min)",
+          },
+          desktop_rate: {
+            type: "number",
+            example: 2,
+            description: "Desktop traffic rate",
+          },
+          auto_renew: {
+            type: "string",
+            enum: ["true", "false"],
+            example: "true",
+            description: "Auto renewal setting",
+          },
+          geo_type: {
+            type: "string",
+            example: "countries",
+            description: "Geographic targeting type",
+          },
+          geo: {
+            type: "string",
+            example: "US",
+            description: "Geographic targeting codes",
+          },
+          shortener: {
+            type: "string",
+            example: "",
+            description: "URL shortener configuration",
+          },
+          rss_feed: {
+            type: "string",
+            example: "",
+            description: "RSS feed URL",
+          },
+          ga_id: {
+            type: "string",
+            example: "",
+            description: "Google Analytics ID",
+          },
+          size: {
+            type: "string",
+            enum: ["eco", "demo", "basic", "standard", "premium"],
+            example: "eco",
+            description: "Campaign size/plan",
+          },
+          speed: {
+            type: "number",
+            example: 200,
+            description: "Traffic speed (0-200)",
           },
           maxHits: {
             type: "number",
