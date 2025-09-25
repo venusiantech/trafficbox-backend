@@ -18,7 +18,23 @@ router.post("/register", async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
-    res.json({ token });
+    res.json({ 
+      success: true,
+      message: "User registered successfully",
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        dob: user.dob,
+        role: user.role,
+        cashBalance: user.cashBalance,
+        credits: user.credits,
+        availableHits: user.availableHits,
+        createdAt: user.createdAt
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -37,7 +53,24 @@ router.post("/login", async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
-    res.json({ message: "User logged in", token });
+    res.json({ 
+      success: true,
+      message: "User logged in successfully",
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        dob: user.dob,
+        role: user.role,
+        cashBalance: user.cashBalance,
+        credits: user.credits,
+        availableHits: user.availableHits,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -65,7 +98,23 @@ router.post("/register-admin", async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
-    res.json({ token, message: "Admin user created successfully" });
+    res.json({ 
+      success: true,
+      message: "Admin user created successfully",
+      token,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        dob: user.dob,
+        role: user.role,
+        cashBalance: user.cashBalance,
+        credits: user.credits,
+        availableHits: user.availableHits,
+        createdAt: user.createdAt
+      }
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

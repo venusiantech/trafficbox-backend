@@ -38,8 +38,17 @@ paths:
               schema:
                 type: object
                 properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "User registered successfully"
                   token:
                     type: string
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  user:
+                    $ref: "#/components/schemas/UserResponse"
         "400":
           description: Email already registered
         "500":
@@ -63,16 +72,23 @@ paths:
                 - password
       responses:
         "200":
-          description: User logged in
+          description: User logged in successfully
           content:
             application/json:
               schema:
                 type: object
                 properties:
+                  success:
+                    type: boolean
+                    example: true
                   message:
                     type: string
+                    example: "User logged in successfully"
                   token:
                     type: string
+                    example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                  user:
+                    $ref: "#/components/schemas/UserResponse"
         "401":
           description: Invalid credentials
         "500":
@@ -232,6 +248,46 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          example: "507f1f77bcf86cd799439011"
+        email:
+          type: string
+          example: "user@example.com"
+        firstName:
+          type: string
+          example: "John"
+        lastName:
+          type: string
+          example: "Doe"
+        dob:
+          type: string
+          format: date
+          example: "1990-01-01"
+        role:
+          type: string
+          enum: [user, admin]
+          example: "user"
+        cashBalance:
+          type: number
+          example: 0
+        credits:
+          type: number
+          example: 5000
+        availableHits:
+          type: number
+          example: 1666
+        createdAt:
+          type: string
+          format: date-time
+          example: "2023-01-01T00:00:00.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2023-01-01T00:00:00.000Z"
     Campaign:
       type: object
       properties:
