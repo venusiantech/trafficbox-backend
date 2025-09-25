@@ -24,7 +24,7 @@ const swaggerDefinition = {
       description: "Development server",
     },
     {
-      url: "https://api.trafficbox.com",
+      url: "https://trafficbox-backend-staging.up.railway.app",
       description: "Production server",
     },
   ],
