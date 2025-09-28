@@ -299,6 +299,91 @@ router.post("/", auth(), async (req, res) => {
   }
 });
 
+// Get all campaigns for authenticated user
+router.get("/", auth(), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+    
+    // Build query filters
+    const query = { user: userId };
+    
+    // Filter by status if provided
+    if (req.query.status) {
+      query.state = req.query.status;
+    }
+    
+    // Filter by vendor if provided
+    if (req.query.vendor) {
+      if (req.query.vendor === 'sparkTraffic') {
+        query.spark_traffic_project_id = { $exists: true, $ne: null };
+      } else if (req.query.vendor === 'nineHits') {
+        query.nine_hits_campaign_id = { $exists: true, $ne: null };
+      }
+    }
+    
+    // Exclude archived campaigns by default unless specifically requested
+    if (!req.query.include_archived) {
+      query.$or = [
+        { is_archived: { $exists: false } },
+        { is_archived: false }
+      ];
+    }
+    
+    // Get total count for pagination
+    const totalCampaigns = await Campaign.countDocuments(query);
+    
+    // Fetch campaigns with pagination
+    const campaigns = await Campaign.find(query)
+      .sort({ createdAt: -1 }) // Most recent first
+      .skip(skip)
+      .limit(limit)
+      .select('-nine_hits_data -spark_traffic_data') // Exclude large vendor data objects
+      .lean(); // Convert to plain objects for better performance
+    
+    logger.campaign("User campaigns retrieved", {
+      userId,
+      count: campaigns.length,
+      totalCampaigns,
+      page,
+      limit,
+      filters: {
+        status: req.query.status,
+        vendor: req.query.vendor,
+        include_archived: req.query.include_archived
+      }
+    });
+    
+    res.json({
+      ok: true,
+      campaigns,
+      pagination: {
+        page,
+        limit,
+        total: totalCampaigns,
+        pages: Math.ceil(totalCampaigns / limit),
+        hasNext: page < Math.ceil(totalCampaigns / limit),
+        hasPrev: page > 1
+      },
+      filters: {
+        status: req.query.status || null,
+        vendor: req.query.vendor || null,
+        include_archived: req.query.include_archived === 'true'
+      }
+    });
+  } catch (err) {
+    logger.error("Get campaigns failed", {
+      userId: req.user.id,
+      error: err.message,
+      stack: err.stack,
+      query: req.query
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get campaign
 router.get("/:id", auth(), async (req, res) => {
   try {
