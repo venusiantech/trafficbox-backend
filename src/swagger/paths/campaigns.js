@@ -750,3 +750,158 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
+
+/**
+ * @swagger
+ * /api/campaigns/{id}/stats:
+ *   get:
+ *     tags:
+ *       - Campaigns
+ *     summary: Get campaign statistics
+ *     description: Get daily hits and visits report for a SparkTraffic campaign using the get-website-traffic-project-stats API. Returns statistics for the specified date range or last 30 days by default.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Campaign ID
+ *         example: "68d580f36550b230cd374d43"
+ *       - in: query
+ *         name: from
+ *         required: false
+ *         schema:
+ *           type: string
+ *           format: date
+ *           pattern: '^\d{4}-\d{2}-\d{2}$'
+ *         description: Start date (YYYY-MM-DD format)
+ *         example: "2024-01-01"
+ *       - in: query
+ *         name: to
+ *         required: false
+ *         schema:
+ *           type: string
+ *           format: date
+ *           pattern: '^\d{4}-\d{2}-\d{2}$'
+ *         description: End date (YYYY-MM-DD format)
+ *         example: "2024-01-31"
+ *       - in: query
+ *         name: include_archived
+ *         required: false
+ *         schema:
+ *           type: boolean
+ *         description: Include archived campaigns
+ *         example: false
+ *     responses:
+ *       200:
+ *         description: Campaign statistics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 campaign:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "68d580f36550b230cd374d43"
+ *                     title:
+ *                       type: string
+ *                       example: "trafficboxes"
+ *                     spark_traffic_project_id:
+ *                       type: string
+ *                       example: "9B51FA9DCDEA"
+ *                 dateRange:
+ *                   type: object
+ *                   properties:
+ *                     from:
+ *                       type: string
+ *                       format: date
+ *                       example: "2024-01-01"
+ *                     to:
+ *                       type: string
+ *                       format: date
+ *                       example: "2024-01-31"
+ *                 stats:
+ *                   type: object
+ *                   description: Statistics data from SparkTraffic API
+ *                   properties:
+ *                     status:
+ *                       type: string
+ *                       example: "ok"
+ *             examples:
+ *               successful_stats:
+ *                 summary: Successful statistics retrieval
+ *                 value:
+ *                   ok: true
+ *                   campaign:
+ *                     id: "68d580f36550b230cd374d43"
+ *                     title: "trafficboxes"
+ *                     spark_traffic_project_id: "9B51FA9DCDEA"
+ *                   dateRange:
+ *                     from: "2024-01-01"
+ *                     to: "2024-01-31"
+ *                   stats:
+ *                     status: "ok"
+ *       400:
+ *         description: Bad request (invalid date format, non-SparkTraffic campaign)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *             examples:
+ *               invalid_date_format:
+ *                 summary: Invalid date format
+ *                 value:
+ *                   error: "Invalid 'from' date format. Use YYYY-MM-DD (e.g., 2024-01-01)"
+ *               non_sparktraffic_campaign:
+ *                 summary: Non-SparkTraffic campaign
+ *                 value:
+ *                   error: "Statistics are only available for SparkTraffic campaigns"
+ *       404:
+ *         description: Campaign not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Forbidden (not campaign owner or admin)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Server error or SparkTraffic API error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                   example: "Failed to fetch campaign statistics"
+ *                 details:
+ *                   type: string
+ *                   example: "Request failed with status code 400"
+ *                 status:
+ *                   type: number
+ *                   example: 400
+ *                 apiResponse:
+ *                   type: object
+ *                   description: Raw response from SparkTraffic API
+ *                 dateRange:
+ *                   type: object
+ *                   properties:
+ *                     from:
+ *                       type: string
+ *                       format: date
+ *                     to:
+ *                       type: string
+ *                       format: date
+ */

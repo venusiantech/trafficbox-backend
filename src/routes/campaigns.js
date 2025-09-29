@@ -3,6 +3,10 @@ const auth = require("../middleware/auth");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
 const vendors = require("../services/vendors");
+const {
+  processSingleCampaignCredits,
+  processAllCampaignCredits,
+} = require("../services/creditDeduction");
 const logger = require("../utils/logger");
 
 const router = express.Router();
@@ -306,43 +310,40 @@ router.get("/", auth(), async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
-    
+
     // Build query filters
     const query = { user: userId };
-    
+
     // Filter by status if provided
     if (req.query.status) {
       query.state = req.query.status;
     }
-    
+
     // Filter by vendor if provided
     if (req.query.vendor) {
-      if (req.query.vendor === 'sparkTraffic') {
+      if (req.query.vendor === "sparkTraffic") {
         query.spark_traffic_project_id = { $exists: true, $ne: null };
-      } else if (req.query.vendor === 'nineHits') {
+      } else if (req.query.vendor === "nineHits") {
         query.nine_hits_campaign_id = { $exists: true, $ne: null };
       }
     }
-    
+
     // Exclude archived campaigns by default unless specifically requested
     if (!req.query.include_archived) {
-      query.$or = [
-        { is_archived: { $exists: false } },
-        { is_archived: false }
-      ];
+      query.$or = [{ is_archived: { $exists: false } }, { is_archived: false }];
     }
-    
+
     // Get total count for pagination
     const totalCampaigns = await Campaign.countDocuments(query);
-    
+
     // Fetch campaigns with pagination
     const campaigns = await Campaign.find(query)
       .sort({ createdAt: -1 }) // Most recent first
       .skip(skip)
       .limit(limit)
-      .select('-nine_hits_data -spark_traffic_data') // Exclude large vendor data objects
+      .select("-nine_hits_data -spark_traffic_data") // Exclude large vendor data objects
       .lean(); // Convert to plain objects for better performance
-    
+
     logger.campaign("User campaigns retrieved", {
       userId,
       count: campaigns.length,
@@ -352,10 +353,10 @@ router.get("/", auth(), async (req, res) => {
       filters: {
         status: req.query.status,
         vendor: req.query.vendor,
-        include_archived: req.query.include_archived
-      }
+        include_archived: req.query.include_archived,
+      },
     });
-    
+
     res.json({
       ok: true,
       campaigns,
@@ -365,20 +366,75 @@ router.get("/", auth(), async (req, res) => {
         total: totalCampaigns,
         pages: Math.ceil(totalCampaigns / limit),
         hasNext: page < Math.ceil(totalCampaigns / limit),
-        hasPrev: page > 1
+        hasPrev: page > 1,
       },
       filters: {
         status: req.query.status || null,
         vendor: req.query.vendor || null,
-        include_archived: req.query.include_archived === 'true'
-      }
+        include_archived: req.query.include_archived === "true",
+      },
     });
   } catch (err) {
     logger.error("Get campaigns failed", {
       userId: req.user.id,
       error: err.message,
       stack: err.stack,
-      query: req.query
+      query: req.query,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get user stats (credits and available hits) - MUST BE BEFORE /:id route
+router.get("/user/stats", auth(), async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select(
+      "credits availableHits email firstName lastName"
+    );
+    if (!user) {
+      logger.warn("User not found for stats", { userId: req.user.id });
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({
+      ok: true,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        credits: user.credits,
+        availableHits: user.availableHits,
+      },
+    });
+  } catch (err) {
+    logger.error("Get user stats failed", {
+      userId: req.user.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get archived campaigns - MUST BE BEFORE /:id route
+router.get("/archived", auth(), async (req, res) => {
+  try {
+    const archivedCampaigns = await Campaign.find({
+      user: req.user.id,
+      is_archived: true,
+    }).sort({ archived_at: -1 });
+
+    res.json({
+      ok: true,
+      campaigns: archivedCampaigns,
+      count: archivedCampaigns.length,
+    });
+  } catch (err) {
+    logger.error("Get archived campaigns failed", {
+      userId: req.user.id,
+      error: err.message,
+      stack: err.stack,
     });
     res.status(500).json({ error: err.message });
   }
@@ -424,24 +480,111 @@ router.get("/:id", auth(), async (req, res) => {
         const axios = require("axios");
         const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
 
-        // Try to get specific project stats directly
+        // Try to get specific project stats
+        const now = new Date();
+        const createdDate = c.createdAt
+          ? c.createdAt.toISOString().split("T")[0]
+          : now.toISOString().split("T")[0];
+
+        // Get stats data
         const statsResp = await axios.post(
-          "https://v2.sparktraffic.com/get-website-traffic-project",
-          {
-            id: c.spark_traffic_project_id,
-          },
+          "https://v2.sparktraffic.com/get-website-traffic-project-stats",
+          null,
           {
             headers: {
               "Content-Type": "application/json",
               API_KEY,
             },
+            params: {
+              unique_id: c.spark_traffic_project_id,
+              from: createdDate,
+              to: now.toISOString().split("T")[0],
+            },
           }
         );
 
+        // Get actual project details to fetch real speed and settings
+        let projectDetails = null;
+        try {
+          // Try to get current project settings by using modify endpoint with current unique_id only
+          // This often returns current project state in the response
+          const projectResp = await axios.post(
+            "https://v2.sparktraffic.com/modify-website-traffic-project",
+            {
+              unique_id: c.spark_traffic_project_id,
+              // Not changing anything, just querying current state
+            },
+            {
+              headers: {
+                "Content-Type": "application/json",
+                API_KEY,
+              },
+            }
+          );
+          
+          // Check if the response contains current project settings
+          if (projectResp.data && projectResp.data.speed !== undefined) {
+            projectDetails = projectResp.data;
+            logger.debug("Project details fetched via modify endpoint", {
+              campaignId: req.params.id,
+              sparkTrafficProjectId: c.spark_traffic_project_id,
+              projectDetails,
+            });
+          } else {
+            logger.warn("Modify endpoint didn't return project details", {
+              campaignId: req.params.id,
+              sparkTrafficProjectId: c.spark_traffic_project_id,
+              response: projectResp.data,
+            });
+          }
+        } catch (projectErr) {
+          logger.warn("Failed to fetch project details via modify endpoint", {
+            campaignId: req.params.id,
+            sparkTrafficProjectId: c.spark_traffic_project_id,
+            error: projectErr.message,
+            status: projectErr.response?.status,
+            responseData: projectErr.response?.data,
+          });
+        }
+
         if (statsResp.data) {
+          // Calculate total hits from stats
+          let totalHits = 0;
+          let totalVisits = 0;
+
+          if (Array.isArray(statsResp.data.hits)) {
+            statsResp.data.hits.forEach((hitData) => {
+              Object.values(hitData).forEach((count) => {
+                totalHits += parseInt(count) || 0;
+              });
+            });
+          }
+
+          if (Array.isArray(statsResp.data.visits)) {
+            statsResp.data.visits.forEach((visitData) => {
+              Object.values(visitData).forEach((count) => {
+                totalVisits += parseInt(count) || 0;
+              });
+            });
+          }
+
           vendorStats = {
             ...statsResp.data,
-            speed: statsResp.data.speed || (c.state === "paused" ? 0 : 200),
+            totalHits,
+            totalVisits,
+            // Use actual speed from project details, fallback to estimate
+            speed: projectDetails?.speed || (c.state === "paused" ? 0 : 200),
+            // Include other project settings if available
+            ...(projectDetails && {
+              projectDetails: {
+                speed: projectDetails.speed,
+                size: projectDetails.size,
+                auto_renew: projectDetails.auto_renew,
+                geo_type: projectDetails.geo_type,
+                traffic_type: projectDetails.traffic_type,
+                // Add other relevant fields you want to show
+              },
+            }),
           };
         } else {
           vendorStats = {
@@ -1156,54 +1299,142 @@ router.post("/:id/restore", auth(), async (req, res) => {
   }
 });
 
-// Get archived campaigns
-router.get("/archived", auth(), async (req, res) => {
+// Get campaign statistics (daily hits and visits report)
+router.get("/:id/stats", auth(), async (req, res) => {
   try {
-    const archivedCampaigns = await Campaign.find({
-      user: req.user.id,
-      is_archived: true,
-    }).sort({ archived_at: -1 });
-
-    res.json({
-      ok: true,
-      campaigns: archivedCampaigns,
-      count: archivedCampaigns.length,
-    });
-  } catch (err) {
-    logger.error("Get archived campaigns failed", {
-      userId: req.user.id,
-      error: err.message,
-      stack: err.stack,
-    });
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Get user stats (credits and available hits)
-router.get("/user/stats", auth(), async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select(
-      "credits availableHits email firstName lastName"
-    );
-    if (!user) {
-      logger.warn("User not found for stats", { userId: req.user.id });
-      return res.status(404).json({ error: "User not found" });
+    const c = await Campaign.findById(req.params.id);
+    if (!c) {
+      logger.warn("Campaign not found for stats", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
+      return res.status(404).json({ error: "Campaign not found" });
     }
 
-    res.json({
-      ok: true,
-      user: {
-        id: user._id,
-        email: user.email,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        credits: user.credits,
-        availableHits: user.availableHits,
-      },
-    });
+    if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
+      logger.warn("Unauthorized campaign stats access attempt", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+        campaignOwner: c.user.toString(),
+        userRole: req.user.role,
+      });
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Don't allow access to archived campaigns unless specifically requested
+    if (c.is_archived && !req.query.include_archived) {
+      logger.warn("Archived campaign stats access without flag", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+
+    // Only SparkTraffic campaigns have stats API
+    if (!c.spark_traffic_project_id) {
+      logger.warn("Campaign stats requested for non-SparkTraffic campaign", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
+      return res.status(400).json({
+        error: "Statistics are only available for SparkTraffic campaigns",
+      });
+    }
+
+    // Get date range from query parameters
+    const from = req.query.from;
+    const to = req.query.to;
+
+    // Validate date format (YYYY-MM-DD)
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (from && !dateRegex.test(from)) {
+      return res.status(400).json({
+        error: "Invalid 'from' date format. Use YYYY-MM-DD (e.g., 2024-01-01)",
+      });
+    }
+    if (to && !dateRegex.test(to)) {
+      return res.status(400).json({
+        error: "Invalid 'to' date format. Use YYYY-MM-DD (e.g., 2024-01-31)",
+      });
+    }
+
+    // If no dates provided, default to last 30 days
+    let fromDate = from;
+    let toDate = to;
+
+    if (!fromDate || !toDate) {
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now);
+      thirtyDaysAgo.setDate(now.getDate() - 30);
+
+      fromDate = fromDate || thirtyDaysAgo.toISOString().split("T")[0];
+      toDate = toDate || now.toISOString().split("T")[0];
+    }
+
+    try {
+      const axios = require("axios");
+      const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+
+      // Call SparkTraffic stats API
+      const statsResp = await axios.post(
+        "https://v2.sparktraffic.com/get-website-traffic-project-stats",
+        null, // POST with no body, params in query string
+        {
+          headers: {
+            "Content-Type": "application/json",
+            API_KEY,
+          },
+          params: {
+            unique_id: c.spark_traffic_project_id,
+            from: fromDate,
+            to: toDate,
+          },
+        }
+      );
+
+      logger.campaign("Campaign stats retrieved successfully", {
+        userId: req.user.id,
+        campaignId: c._id,
+        sparkTrafficProjectId: c.spark_traffic_project_id,
+        dateRange: { from: fromDate, to: toDate },
+      });
+
+      res.json({
+        ok: true,
+        campaign: {
+          id: c._id,
+          title: c.title,
+          spark_traffic_project_id: c.spark_traffic_project_id,
+        },
+        dateRange: {
+          from: fromDate,
+          to: toDate,
+        },
+        stats: statsResp.data,
+      });
+    } catch (err) {
+      logger.error("SparkTraffic stats API failed", {
+        userId: req.user.id,
+        campaignId: c._id,
+        sparkTrafficProjectId: c.spark_traffic_project_id,
+        error: err.message,
+        status: err.response?.status,
+        responseData: err.response?.data,
+        dateRange: { from: fromDate, to: toDate },
+      });
+
+      res.status(500).json({
+        error: "Failed to fetch campaign statistics",
+        details: err.message,
+        status: err.response?.status,
+        apiResponse: err.response?.data,
+        dateRange: { from: fromDate, to: toDate },
+      });
+    }
   } catch (err) {
-    logger.error("Get user stats failed", {
+    logger.error("Get campaign stats failed", {
       userId: req.user.id,
+      campaignId: req.params.id,
       error: err.message,
       stack: err.stack,
     });
@@ -1263,6 +1494,440 @@ router.post("/user/:userId/add-credits", auth("admin"), async (req, res) => {
     logger.error("Add credits failed", {
       adminId: req.user.id,
       targetUserId: req.params.userId,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Manual credit deduction for specific campaign (admin only)
+router.post("/:id/process-credits", auth("admin"), async (req, res) => {
+  try {
+    const result = await processSingleCampaignCredits(req.params.id);
+
+    logger.campaign("Manual credit processing completed", {
+      adminId: req.user.id,
+      campaignId: req.params.id,
+      result,
+    });
+
+    res.json({
+      ok: true,
+      message: "Credit processing completed",
+      result,
+    });
+  } catch (err) {
+    logger.error("Manual credit processing failed", {
+      adminId: req.user.id,
+      campaignId: req.params.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Test credit deduction for specific campaign (owner or admin)
+router.post("/:id/test-credits", auth(), async (req, res) => {
+  try {
+    const c = await Campaign.findById(req.params.id).populate(
+      "user",
+      "credits availableHits email"
+    );
+    if (!c) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+
+    if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Get current stats from SparkTraffic to show current state
+    let currentStats = null;
+    let totalCurrentHits = 0;
+
+    try {
+      const axios = require("axios");
+      const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+      const now = new Date();
+      const createdDate = c.createdAt
+        ? c.createdAt.toISOString().split("T")[0]
+        : now.toISOString().split("T")[0];
+
+      const statsResp = await axios.post(
+        "https://v2.sparktraffic.com/get-website-traffic-project-stats",
+        null,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            API_KEY,
+          },
+          params: {
+            unique_id: c.spark_traffic_project_id,
+            from: createdDate,
+            to: now.toISOString().split("T")[0],
+          },
+        }
+      );
+
+      if (statsResp.data && Array.isArray(statsResp.data.hits)) {
+        statsResp.data.hits.forEach((hitData) => {
+          Object.values(hitData).forEach((count) => {
+            totalCurrentHits += parseInt(count) || 0;
+          });
+        });
+      }
+      currentStats = statsResp.data;
+    } catch (err) {
+      logger.error("Failed to get current stats for test", {
+        campaignId: c._id,
+        error: err.message,
+      });
+    }
+
+    // Calculate what would happen
+    const totalHitsCounted = c.total_hits_counted || 0;
+    const potentialNewHits = Math.max(0, totalCurrentHits - totalHitsCounted);
+
+    // Actually process credits (this will only charge if there are new hits)
+    const result = await processSingleCampaignCredits(req.params.id);
+
+    logger.campaign("Test credit processing completed", {
+      userId: req.user.id,
+      campaignId: req.params.id,
+      result,
+      currentAnalysis: {
+        totalCurrentHits,
+        totalHitsCounted,
+        potentialNewHits,
+      },
+    });
+
+    res.json({
+      ok: true,
+      message: "Test credit processing completed",
+      result,
+      currentState: {
+        totalCurrentHits,
+        totalHitsCounted,
+        potentialNewHits,
+        lastStatsCheck: c.last_stats_check,
+        creditDeductionEnabled: c.credit_deduction_enabled,
+        userCredits: c.user.credits,
+      },
+      explanation:
+        potentialNewHits === 0
+          ? "No new hits since last automatic check. The system has already processed all current hits."
+          : `${potentialNewHits} new hits detected and will be charged.`,
+      info: "This endpoint shows current state and processes any new hits since last check",
+    });
+  } catch (err) {
+    logger.error("Test credit processing failed", {
+      userId: req.user.id,
+      campaignId: req.params.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Debug endpoint to show campaign credit state without processing (owner or admin)
+router.get("/:id/credit-debug", auth(), async (req, res) => {
+  try {
+    const c = await Campaign.findById(req.params.id).populate(
+      "user",
+      "credits availableHits email"
+    );
+    if (!c) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+
+    if (c.user._id.toString() !== req.user.id && req.user.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Get current stats from SparkTraffic with detailed date breakdown
+    let totalCurrentHits = 0;
+    let todayHits = 0;
+    let currentStats = null;
+    let sparkTrafficError = null;
+    let dailyBreakdown = {};
+
+    try {
+      const axios = require("axios");
+      const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+      const now = new Date();
+      const today = now.toISOString().split("T")[0];
+      const createdDate = c.createdAt
+        ? c.createdAt.toISOString().split("T")[0]
+        : today;
+
+      const statsResp = await axios.post(
+        "https://v2.sparktraffic.com/get-website-traffic-project-stats",
+        null,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            API_KEY,
+          },
+          params: {
+            unique_id: c.spark_traffic_project_id,
+            from: createdDate,
+            to: today,
+          },
+        }
+      );
+
+      if (statsResp.data && Array.isArray(statsResp.data.hits)) {
+        statsResp.data.hits.forEach((hitData) => {
+          Object.keys(hitData).forEach((date) => {
+            const count = parseInt(hitData[date]) || 0;
+            dailyBreakdown[date] = count;
+            totalCurrentHits += count;
+            if (date === today) {
+              todayHits += count;
+            }
+          });
+        });
+      }
+      currentStats = statsResp.data;
+    } catch (err) {
+      logger.error("Failed to get current stats for debug", {
+        campaignId: c._id,
+        error: err.message,
+        status: err.response?.status,
+        responseData: err.response?.data,
+      });
+      sparkTrafficError = {
+        message: err.message,
+        status: err.response?.status,
+        response: err.response?.data,
+      };
+    }
+
+    const totalHitsCounted = c.total_hits_counted || 0;
+    const potentialNewHits = Math.max(0, totalCurrentHits - totalHitsCounted);
+
+    res.json({
+      ok: true,
+      campaign: {
+        id: c._id,
+        title: c.title,
+        spark_traffic_project_id: c.spark_traffic_project_id,
+        createdAt: c.createdAt,
+        last_stats_check: c.last_stats_check,
+        total_hits_counted: c.total_hits_counted,
+        credit_deduction_enabled: c.credit_deduction_enabled,
+      },
+      user: {
+        id: c.user._id,
+        email: c.user.email,
+        credits: c.user.credits,
+        availableHits: c.user.availableHits,
+      },
+      currentStats: {
+        totalCurrentHits,
+        todayHits,
+        totalHitsCounted,
+        potentialNewHits,
+        dailyBreakdown,
+        dateRange: {
+          from: c.createdAt
+            ? c.createdAt.toISOString().split("T")[0]
+            : new Date().toISOString().split("T")[0],
+          to: new Date().toISOString().split("T")[0],
+        },
+        rawSparkTrafficData: currentStats,
+        sparkTrafficError: sparkTrafficError,
+      },
+      analysis: {
+        status: potentialNewHits > 0 ? "NEW_HITS_AVAILABLE" : "NO_NEW_HITS",
+        nextChargeAmount: potentialNewHits * 1, // 1 credit per hit
+        explanation:
+          potentialNewHits === 0
+            ? "All current hits have been processed. Wait for more traffic or check if automatic system is working."
+            : `${potentialNewHits} new hits ready to be charged (${potentialNewHits} credits).`,
+        dateRangeExplanation: `Total hits counted (${totalHitsCounted}) covers the full date range from campaign creation. Today's hits: ${todayHits}. Full range total: ${totalCurrentHits}.`,
+      },
+      info: "Debug endpoint - shows current state without processing any charges",
+    });
+  } catch (err) {
+    logger.error("Credit debug failed", {
+      userId: req.user.id,
+      campaignId: req.params.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Process all campaigns credits (admin only)
+router.post("/admin/process-all-credits", auth("admin"), async (req, res) => {
+  try {
+    const result = await processAllCampaignCredits();
+
+    logger.campaign("Manual bulk credit processing completed", {
+      adminId: req.user.id,
+      result,
+    });
+
+    res.json({
+      ok: true,
+      message: "Bulk credit processing completed",
+      result,
+    });
+  } catch (err) {
+    logger.error("Manual bulk credit processing failed", {
+      adminId: req.user.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Toggle credit deduction for a campaign
+router.post("/:id/toggle-credit-deduction", auth(), async (req, res) => {
+  try {
+    const c = await Campaign.findById(req.params.id);
+    if (!c) {
+      logger.warn("Campaign not found for credit deduction toggle", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+
+    if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
+      logger.warn("Unauthorized credit deduction toggle attempt", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+        campaignOwner: c.user.toString(),
+        userRole: req.user.role,
+      });
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const newState = !c.credit_deduction_enabled;
+    c.credit_deduction_enabled = newState;
+    await c.save();
+
+    logger.campaign("Credit deduction toggled", {
+      userId: req.user.id,
+      campaignId: c._id,
+      previousState: !newState,
+      newState: newState,
+    });
+
+    res.json({
+      ok: true,
+      message: `Credit deduction ${newState ? "enabled" : "disabled"}`,
+      campaign: {
+        id: c._id,
+        title: c.title,
+        credit_deduction_enabled: c.credit_deduction_enabled,
+      },
+    });
+  } catch (err) {
+    logger.error("Credit deduction toggle failed", {
+      userId: req.user.id,
+      campaignId: req.params.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reset campaign hit counter (owner or admin) - for debugging
+router.post("/:id/reset-hit-counter", auth(), async (req, res) => {
+  try {
+    const c = await Campaign.findById(req.params.id);
+    if (!c) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+
+    if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Reset the hit counter to current SparkTraffic total
+    let totalCurrentHits = 0;
+    try {
+      const axios = require("axios");
+      const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+      const now = new Date();
+      const createdDate = c.createdAt
+        ? c.createdAt.toISOString().split("T")[0]
+        : now.toISOString().split("T")[0];
+
+      const statsResp = await axios.post(
+        "https://v2.sparktraffic.com/get-website-traffic-project-stats",
+        null,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            API_KEY,
+          },
+          params: {
+            unique_id: c.spark_traffic_project_id,
+            from: createdDate,
+            to: now.toISOString().split("T")[0],
+          },
+        }
+      );
+
+      if (statsResp.data && Array.isArray(statsResp.data.hits)) {
+        statsResp.data.hits.forEach((hitData) => {
+          Object.values(hitData).forEach((count) => {
+            totalCurrentHits += parseInt(count) || 0;
+          });
+        });
+      }
+    } catch (err) {
+      logger.error("Failed to get current stats for reset", {
+        campaignId: c._id,
+        error: err.message,
+      });
+      return res.status(500).json({
+        error: "Failed to fetch current stats from SparkTraffic",
+        details: err.message,
+      });
+    }
+
+    const oldTotal = c.total_hits_counted || 0;
+    c.total_hits_counted = totalCurrentHits;
+    c.last_stats_check = new Date();
+    await c.save();
+
+    logger.campaign("Hit counter reset", {
+      userId: req.user.id,
+      campaignId: c._id,
+      oldTotal,
+      newTotal: totalCurrentHits,
+    });
+
+    res.json({
+      ok: true,
+      message: "Hit counter reset successfully",
+      campaign: {
+        id: c._id,
+        title: c.title,
+      },
+      changes: {
+        oldTotal,
+        newTotal: totalCurrentHits,
+        difference: totalCurrentHits - oldTotal,
+      },
+      info: "The hit counter has been synchronized with current SparkTraffic data. Future hits will be properly tracked.",
+    });
+  } catch (err) {
+    logger.error("Hit counter reset failed", {
+      userId: req.user.id,
+      campaignId: req.params.id,
       error: err.message,
       stack: err.stack,
     });

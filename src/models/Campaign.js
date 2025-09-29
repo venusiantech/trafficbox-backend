@@ -26,6 +26,10 @@ const campaignSchema = new mongoose.Schema(
     archived_at: { type: Date }, // When campaign was archived
     delete_eligible: { type: Boolean, default: false }, // Can be permanently deleted after 7 days
     last_sync_at: Date,
+    last_stats_check: { type: Date }, // Last time we checked for stats to deduct credits
+    total_hits_counted: { type: Number, default: 0 }, // Total hits we've already counted for credit deduction
+    total_visits_counted: { type: Number, default: 0 }, // Total visits we've already counted
+    credit_deduction_enabled: { type: Boolean, default: true }, // Enable/disable automatic credit deduction
     metadata: { type: mongoose.Schema.Types.Mixed },
   },
   { timestamps: true }
