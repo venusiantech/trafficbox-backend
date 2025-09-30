@@ -11,6 +11,43 @@ const logger = require("../utils/logger");
 
 const router = express.Router();
 
+// Helper function to create clean campaign response (hiding implementation details)
+function createCleanCampaignResponse(campaign, includeStats = false, vendorStats = null) {
+  return {
+    id: campaign._id,
+    title: campaign.title,
+    urls: campaign.urls,
+    duration_min: campaign.duration_min,
+    duration_max: campaign.duration_max,
+    countries: campaign.countries,
+    rule: campaign.rule,
+    macros: campaign.macros,
+    is_adult: campaign.is_adult,
+    is_coin_mining: campaign.is_coin_mining,
+    state: campaign.state,
+    is_archived: campaign.is_archived,
+    createdAt: campaign.createdAt,
+    updatedAt: campaign.updatedAt,
+    archived_at: campaign.archived_at,
+    delete_eligible: campaign.delete_eligible,
+    // User-friendly status
+    status: campaign.state === "paused" ? "paused" : 
+            campaign.state === "created" ? "active" : 
+            campaign.state === "archived" ? "archived" : campaign.state,
+    // Include stats only when requested
+    ...(includeStats && vendorStats && {
+      stats: {
+        totalHits: vendorStats.totalHits || 0,
+        totalVisits: vendorStats.totalVisits || 0,
+        speed: vendorStats.speed || 0,
+        status: campaign.state === "paused" ? "paused" : "active",
+        dailyHits: vendorStats.hits || [],
+        dailyVisits: vendorStats.visits || [],
+      }
+    }),
+  };
+}
+
 // Create campaign -> siteAdd
 router.post("/", auth(), async (req, res) => {
   logger.campaign("Campaign creation started", {
@@ -186,14 +223,12 @@ router.post("/", auth(), async (req, res) => {
 
         return res.json({
           ok: true,
-          campaign: camp,
-          vendorRaw: vendorResp,
-          resumeRaw:
-            resumeResp && resumeResp.data ? resumeResp.data : resumeResp,
+          campaign: createCleanCampaignResponse(camp),
           userStats: {
             hitsDeducted: requiredHits,
             remainingHits: user.availableHits,
           },
+          message: "Campaign created successfully",
         });
       } catch (err) {
         logger.error("SparkTraffic campaign creation failed", {
@@ -357,9 +392,12 @@ router.get("/", auth(), async (req, res) => {
       },
     });
 
+    // Clean up campaign data to hide implementation details
+    const cleanCampaigns = campaigns.map(campaign => createCleanCampaignResponse(campaign));
+
     res.json({
       ok: true,
-      campaigns,
+      campaigns: cleanCampaigns,
       pagination: {
         page,
         limit,
@@ -425,10 +463,13 @@ router.get("/archived", auth(), async (req, res) => {
       is_archived: true,
     }).sort({ archived_at: -1 });
 
+    // Clean up archived campaign data
+    const cleanArchivedCampaigns = archivedCampaigns.map(campaign => createCleanCampaignResponse(campaign));
+
     res.json({
       ok: true,
-      campaigns: archivedCampaigns,
-      count: archivedCampaigns.length,
+      campaigns: cleanArchivedCampaigns,
+      count: cleanArchivedCampaigns.length,
     });
   } catch (err) {
     logger.error("Get archived campaigns failed", {
@@ -630,7 +671,7 @@ router.get("/:id", auth(), async (req, res) => {
       }
     }
 
-    res.json({ ...c.toObject(), vendorStats });
+    res.json(createCleanCampaignResponse(c, true, vendorStats));
   } catch (err) {
     logger.error("Get campaign failed", {
       userId: req.user.id,
@@ -1088,18 +1129,20 @@ router.post("/:id/modify", auth(), async (req, res) => {
         ? { error: vendorResp.error }
         : vendorResp;
 
-    // Return response matching SparkTraffic format
+    // Return response with clean campaign data
+    const cleanCampaign = createCleanCampaignResponse(c);
+    
     if (cleanVendorResp && cleanVendorResp.status === "ok") {
       res.json({
         status: "ok",
-        campaign: c,
-        vendorResp: cleanVendorResp,
+        campaign: cleanCampaign,
+        message: "Campaign updated successfully"
       });
     } else {
       res.json({
         ok: true,
-        campaign: c,
-        vendorResp: cleanVendorResp,
+        campaign: cleanCampaign,
+        message: "Campaign updated successfully"
       });
     }
   } catch (err) {
@@ -1926,6 +1969,123 @@ router.post("/:id/reset-hit-counter", auth(), async (req, res) => {
     });
   } catch (err) {
     logger.error("Hit counter reset failed", {
+      userId: req.user.id,
+      campaignId: req.params.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reset campaign counters (both hits and visits) - for debugging inflated counts
+router.post("/:id/reset-counters", auth(), async (req, res) => {
+  try {
+    const c = await Campaign.findById(req.params.id);
+    if (!c) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+
+    if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Reset both hit and visit counters to current SparkTraffic totals
+    let totalCurrentHits = 0;
+    let totalCurrentVisits = 0;
+    
+    try {
+      const axios = require("axios");
+      const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+      const now = new Date();
+      const createdDate = c.createdAt
+        ? c.createdAt.toISOString().split("T")[0]
+        : now.toISOString().split("T")[0];
+
+      const statsResp = await axios.post(
+        "https://v2.sparktraffic.com/get-website-traffic-project-stats",
+        null,
+        {
+          headers: {
+            "Content-Type": "application/json",
+            API_KEY,
+          },
+          params: {
+            unique_id: c.spark_traffic_project_id,
+            from: createdDate,
+            to: now.toISOString().split("T")[0],
+          },
+        }
+      );
+
+      // Calculate total hits
+      if (statsResp.data && Array.isArray(statsResp.data.hits)) {
+        statsResp.data.hits.forEach((hitData) => {
+          Object.values(hitData).forEach((count) => {
+            totalCurrentHits += parseInt(count) || 0;
+          });
+        });
+      }
+
+      // Calculate total visits
+      if (statsResp.data && Array.isArray(statsResp.data.visits)) {
+        statsResp.data.visits.forEach((visitData) => {
+          Object.values(visitData).forEach((count) => {
+            totalCurrentVisits += parseInt(count) || 0;
+          });
+        });
+      }
+    } catch (err) {
+      logger.error("Failed to get current stats for reset", {
+        campaignId: c._id,
+        error: err.message,
+      });
+      return res.status(500).json({
+        error: "Failed to fetch current stats from SparkTraffic",
+        details: err.message,
+      });
+    }
+
+    const oldHitsTotal = c.total_hits_counted || 0;
+    const oldVisitsTotal = c.total_visits_counted || 0;
+    
+    c.total_hits_counted = totalCurrentHits;
+    c.total_visits_counted = totalCurrentVisits;
+    c.last_stats_check = new Date();
+    await c.save();
+
+    logger.campaign("Hit and visit counters reset", {
+      userId: req.user.id,
+      campaignId: c._id,
+      oldHitsTotal,
+      newHitsTotal: totalCurrentHits,
+      oldVisitsTotal,
+      newVisitsTotal: totalCurrentVisits,
+    });
+
+    res.json({
+      ok: true,
+      message: "Hit and visit counters reset successfully",
+      campaign: {
+        id: c._id,
+        title: c.title,
+      },
+      changes: {
+        hits: {
+          old: oldHitsTotal,
+          new: totalCurrentHits,
+          difference: totalCurrentHits - oldHitsTotal,
+        },
+        visits: {
+          old: oldVisitsTotal,
+          new: totalCurrentVisits,
+          difference: totalCurrentVisits - oldVisitsTotal,
+        },
+      },
+      info: "Both hit and visit counters have been synchronized with current SparkTraffic data. The inflated visit count issue has been fixed.",
+    });
+  } catch (err) {
+    logger.error("Counter reset failed", {
       userId: req.user.id,
       campaignId: req.params.id,
       error: err.message,

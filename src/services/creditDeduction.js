@@ -183,10 +183,18 @@ async function processCampaignCredits(campaign) {
         );
 
         let totalHitsEver = 0;
+        let totalVisitsEver = 0;
         if (totalStatsResp.data && Array.isArray(totalStatsResp.data.hits)) {
           totalStatsResp.data.hits.forEach((hitData) => {
             Object.values(hitData).forEach((count) => {
               totalHitsEver += parseInt(count) || 0;
+            });
+          });
+        }
+        if (totalStatsResp.data && Array.isArray(totalStatsResp.data.visits)) {
+          totalStatsResp.data.visits.forEach((visitData) => {
+            Object.values(visitData).forEach((count) => {
+              totalVisitsEver += parseInt(count) || 0;
             });
           });
         }
@@ -195,6 +203,7 @@ async function processCampaignCredits(campaign) {
         // Just set the baseline for future comparisons
         actualNewHits = 0;
         campaign.total_hits_counted = totalHitsEver;
+        campaign.total_visits_counted = totalVisitsEver;
 
         logger.debug("First check - establishing baseline", {
           campaignId: campaign._id,
@@ -210,6 +219,7 @@ async function processCampaignCredits(campaign) {
         // Fallback: use current period total as baseline
         actualNewHits = 0;
         campaign.total_hits_counted = totalHitsInPeriod;
+        campaign.total_visits_counted = totalVisitsInPeriod;
       }
     } else {
       // Subsequent checks: Calculate new hits since last check
@@ -235,6 +245,7 @@ async function processCampaignCredits(campaign) {
         );
 
         let totalHitsEver = 0;
+        let totalVisitsEver = 0;
         if (totalStatsResp.data && Array.isArray(totalStatsResp.data.hits)) {
           totalStatsResp.data.hits.forEach((hitData) => {
             Object.values(hitData).forEach((count) => {
@@ -242,13 +253,24 @@ async function processCampaignCredits(campaign) {
             });
           });
         }
+        if (totalStatsResp.data && Array.isArray(totalStatsResp.data.visits)) {
+          totalStatsResp.data.visits.forEach((visitData) => {
+            Object.values(visitData).forEach((count) => {
+              totalVisitsEver += parseInt(count) || 0;
+            });
+          });
+        }
 
         // Calculate new hits = total hits ever - previously counted hits
         actualNewHits = Math.max(0, totalHitsEver - previousHitsCounted);
+        
+        // Update the total visits counted to the current cumulative total
+        campaign.total_visits_counted = totalVisitsEver;
 
         logger.debug("Subsequent check - calculating new hits", {
           campaignId: campaign._id,
           totalHitsEver,
+          totalVisitsEver,
           previousHitsCounted,
           actualNewHits,
         });
@@ -310,8 +332,9 @@ async function processCampaignCredits(campaign) {
       const newTotalCounted =
         (campaign.total_hits_counted || 0) + actualNewHits;
       campaign.total_hits_counted = newTotalCounted;
-      campaign.total_visits_counted =
-        (campaign.total_visits_counted || 0) + totalVisitsInPeriod;
+      // Don't add period visits repeatedly - this was causing the inflated count
+      // The total_visits_counted should be set to the actual cumulative total from SparkTraffic
+      // which is handled in the baseline establishment and subsequent checks above
       campaign.last_stats_check = now;
       await campaign.save();
 
