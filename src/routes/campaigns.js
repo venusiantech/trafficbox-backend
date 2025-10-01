@@ -323,7 +323,7 @@ router.post("/", auth(), async (req, res) => {
 
     res.json({
       ok: true,
-      campaign: camp,
+      campaign: createCleanCampaignResponse(camp),
       vendorRaw: vendorResp,
       userStats: {
         hitsDeducted: requiredHits,
@@ -1034,7 +1034,7 @@ router.post("/:id/pause", auth(), async (req, res) => {
 
       return res.json({
         ok: true,
-        campaign: c,
+        campaign: createCleanCampaignResponse(c),
         vendorResp:
           vendorResp && vendorResp.data
             ? vendorResp.data
@@ -1079,7 +1079,7 @@ router.post("/:id/pause", auth(), async (req, res) => {
         vendor: "9Hits",
       });
 
-      return res.json({ ok: true, campaign: c, vendorResp: nineResp });
+      return res.json({ ok: true, campaign: createCleanCampaignResponse(c), vendorResp: nineResp });
     }
 
     logger.warn("No vendor campaign ID found for pause", {
@@ -1166,7 +1166,7 @@ router.post("/:id/resume", auth(), async (req, res) => {
 
       return res.json({
         ok: true,
-        campaign: c,
+        campaign: createCleanCampaignResponse(c),
         vendorResp:
           vendorResp && vendorResp.data
             ? vendorResp.data
@@ -1214,7 +1214,7 @@ router.post("/:id/resume", auth(), async (req, res) => {
       vendor: c.nine_hits_campaign_id ? "9Hits" : "unknown",
     });
 
-    res.json({ ok: true, campaign: c, vendorResp });
+    res.json({ ok: true, campaign: createCleanCampaignResponse(c), vendorResp });
   } catch (err) {
     logger.error("Campaign resume failed", {
       userId: req.user.id,
