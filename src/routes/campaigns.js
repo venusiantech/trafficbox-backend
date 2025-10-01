@@ -392,8 +392,153 @@ router.get("/", auth(), async (req, res) => {
       },
     });
 
-    // Clean up campaign data to hide implementation details
-    const cleanCampaigns = campaigns.map(campaign => createCleanCampaignResponse(campaign));
+    // Fetch vendor stats for each campaign
+    const cleanCampaigns = await Promise.all(
+      campaigns.map(async (campaign) => {
+        let vendorStats = null;
+
+        // Fetch SparkTraffic stats
+        if (campaign.spark_traffic_project_id) {
+          try {
+            const axios = require("axios");
+            const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+
+            // Try to get specific project stats
+            const now = new Date();
+            const createdDate = campaign.createdAt
+              ? campaign.createdAt.toISOString().split("T")[0]
+              : now.toISOString().split("T")[0];
+
+            // Get stats data
+            const statsResp = await axios.post(
+              "https://v2.sparktraffic.com/get-website-traffic-project-stats",
+              null,
+              {
+                headers: {
+                  "Content-Type": "application/json",
+                  API_KEY,
+                },
+                params: {
+                  unique_id: campaign.spark_traffic_project_id,
+                  from: createdDate,
+                  to: now.toISOString().split("T")[0],
+                },
+              }
+            );
+
+            // Get actual project details to fetch real speed and settings
+            let projectDetails = null;
+            try {
+              // Try to get current project settings by using modify endpoint with current unique_id only
+              // This often returns current project state in the response
+              const projectResp = await axios.post(
+                "https://v2.sparktraffic.com/modify-website-traffic-project",
+                {
+                  unique_id: campaign.spark_traffic_project_id,
+                  // Not changing anything, just querying current state
+                },
+                {
+                  headers: {
+                    "Content-Type": "application/json",
+                    API_KEY,
+                  },
+                }
+              );
+              
+              // Check if the response contains current project settings
+              if (projectResp.data && projectResp.data.speed !== undefined) {
+                projectDetails = projectResp.data;
+              }
+            } catch (projectErr) {
+              // Silently continue if project details fetch fails
+            }
+
+            if (statsResp.data) {
+              // Calculate total hits from stats
+              let totalHits = 0;
+              let totalVisits = 0;
+
+              if (Array.isArray(statsResp.data.hits)) {
+                statsResp.data.hits.forEach((hitData) => {
+                  Object.values(hitData).forEach((count) => {
+                    totalHits += parseInt(count) || 0;
+                  });
+                });
+              }
+
+              if (Array.isArray(statsResp.data.visits)) {
+                statsResp.data.visits.forEach((visitData) => {
+                  Object.values(visitData).forEach((count) => {
+                    totalVisits += parseInt(count) || 0;
+                  });
+                });
+              }
+
+              vendorStats = {
+                ...statsResp.data,
+                totalHits,
+                totalVisits,
+                // Use actual speed from project details, fallback to estimate
+                speed: projectDetails?.speed || (campaign.state === "paused" ? 0 : 200),
+                // Include other project settings if available
+                ...(projectDetails && {
+                  projectDetails: {
+                    speed: projectDetails.speed,
+                    size: projectDetails.size,
+                    auto_renew: projectDetails.auto_renew,
+                    geo_type: projectDetails.geo_type,
+                    traffic_type: projectDetails.traffic_type,
+                    // Add other relevant fields you want to show
+                  },
+                }),
+              };
+            } else {
+              vendorStats = {
+                error: "No data returned from SparkTraffic",
+                response: statsResp.data,
+              };
+            }
+          } catch (err) {
+            logger.error("Failed to fetch SparkTraffic vendor stats for campaign list", {
+              userId: req.user.id,
+              campaignId: campaign._id,
+              sparkTrafficProjectId: campaign.spark_traffic_project_id,
+              error: err.message,
+              status: err.response?.status,
+              responseData: err.response?.data,
+            });
+            vendorStats = {
+              error: "Failed to fetch vendor stats",
+              details: err.message,
+              status: err.response?.status,
+              apiResponse: err.response?.data,
+            };
+          }
+        }
+
+        // Fetch 9Hits stats
+        if (campaign.nine_hits_campaign_id) {
+          try {
+            const nine = require("../services/nineHits");
+            const statsResp = await nine.siteGet({ id: campaign.nine_hits_campaign_id });
+            vendorStats = statsResp;
+          } catch (err) {
+            logger.error("Failed to fetch 9Hits vendor stats for campaign list", {
+              userId: req.user.id,
+              campaignId: campaign._id,
+              nineHitsId: campaign.nine_hits_campaign_id,
+              error: err.message,
+            });
+            vendorStats = {
+              error: "Failed to fetch vendor stats",
+              details: err.message,
+            };
+          }
+        }
+
+        return createCleanCampaignResponse(campaign, true, vendorStats);
+      })
+    );
 
     res.json({
       ok: true,
@@ -463,8 +608,153 @@ router.get("/archived", auth(), async (req, res) => {
       is_archived: true,
     }).sort({ archived_at: -1 });
 
-    // Clean up archived campaign data
-    const cleanArchivedCampaigns = archivedCampaigns.map(campaign => createCleanCampaignResponse(campaign));
+    // Fetch vendor stats for each archived campaign
+    const cleanArchivedCampaigns = await Promise.all(
+      archivedCampaigns.map(async (campaign) => {
+        let vendorStats = null;
+
+        // Fetch SparkTraffic stats
+        if (campaign.spark_traffic_project_id) {
+          try {
+            const axios = require("axios");
+            const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+
+            // Try to get specific project stats
+            const now = new Date();
+            const createdDate = campaign.createdAt
+              ? campaign.createdAt.toISOString().split("T")[0]
+              : now.toISOString().split("T")[0];
+
+            // Get stats data
+            const statsResp = await axios.post(
+              "https://v2.sparktraffic.com/get-website-traffic-project-stats",
+              null,
+              {
+                headers: {
+                  "Content-Type": "application/json",
+                  API_KEY,
+                },
+                params: {
+                  unique_id: campaign.spark_traffic_project_id,
+                  from: createdDate,
+                  to: now.toISOString().split("T")[0],
+                },
+              }
+            );
+
+            // Get actual project details to fetch real speed and settings
+            let projectDetails = null;
+            try {
+              // Try to get current project settings by using modify endpoint with current unique_id only
+              // This often returns current project state in the response
+              const projectResp = await axios.post(
+                "https://v2.sparktraffic.com/modify-website-traffic-project",
+                {
+                  unique_id: campaign.spark_traffic_project_id,
+                  // Not changing anything, just querying current state
+                },
+                {
+                  headers: {
+                    "Content-Type": "application/json",
+                    API_KEY,
+                  },
+                }
+              );
+              
+              // Check if the response contains current project settings
+              if (projectResp.data && projectResp.data.speed !== undefined) {
+                projectDetails = projectResp.data;
+              }
+            } catch (projectErr) {
+              // Silently continue if project details fetch fails
+            }
+
+            if (statsResp.data) {
+              // Calculate total hits from stats
+              let totalHits = 0;
+              let totalVisits = 0;
+
+              if (Array.isArray(statsResp.data.hits)) {
+                statsResp.data.hits.forEach((hitData) => {
+                  Object.values(hitData).forEach((count) => {
+                    totalHits += parseInt(count) || 0;
+                  });
+                });
+              }
+
+              if (Array.isArray(statsResp.data.visits)) {
+                statsResp.data.visits.forEach((visitData) => {
+                  Object.values(visitData).forEach((count) => {
+                    totalVisits += parseInt(count) || 0;
+                  });
+                });
+              }
+
+              vendorStats = {
+                ...statsResp.data,
+                totalHits,
+                totalVisits,
+                // Use actual speed from project details, fallback to estimate
+                speed: projectDetails?.speed || (campaign.state === "paused" ? 0 : 200),
+                // Include other project settings if available
+                ...(projectDetails && {
+                  projectDetails: {
+                    speed: projectDetails.speed,
+                    size: projectDetails.size,
+                    auto_renew: projectDetails.auto_renew,
+                    geo_type: projectDetails.geo_type,
+                    traffic_type: projectDetails.traffic_type,
+                    // Add other relevant fields you want to show
+                  },
+                }),
+              };
+            } else {
+              vendorStats = {
+                error: "No data returned from SparkTraffic",
+                response: statsResp.data,
+              };
+            }
+          } catch (err) {
+            logger.error("Failed to fetch SparkTraffic vendor stats for archived campaign list", {
+              userId: req.user.id,
+              campaignId: campaign._id,
+              sparkTrafficProjectId: campaign.spark_traffic_project_id,
+              error: err.message,
+              status: err.response?.status,
+              responseData: err.response?.data,
+            });
+            vendorStats = {
+              error: "Failed to fetch vendor stats",
+              details: err.message,
+              status: err.response?.status,
+              apiResponse: err.response?.data,
+            };
+          }
+        }
+
+        // Fetch 9Hits stats
+        if (campaign.nine_hits_campaign_id) {
+          try {
+            const nine = require("../services/nineHits");
+            const statsResp = await nine.siteGet({ id: campaign.nine_hits_campaign_id });
+            vendorStats = statsResp;
+          } catch (err) {
+            logger.error("Failed to fetch 9Hits vendor stats for archived campaign list", {
+              userId: req.user.id,
+              campaignId: campaign._id,
+              nineHitsId: campaign.nine_hits_campaign_id,
+              error: err.message,
+            });
+            vendorStats = {
+              error: "Failed to fetch vendor stats",
+              details: err.message,
+            };
+          }
+        }
+
+        return createCleanCampaignResponse(campaign, true, vendorStats);
+      })
+    );
 
     res.json({
       ok: true,
