@@ -11,8 +11,62 @@ const logger = require("../utils/logger");
 
 const router = express.Router();
 
+// Helper function to validate geo format
+function validateGeoFormat(geo) {
+  if (!Array.isArray(geo)) {
+    return { valid: false, error: "geo must be an array" };
+  }
+
+  if (geo.length === 0) {
+    return { valid: true }; // Empty array is valid
+  }
+
+  let totalPercent = 0;
+  for (const item of geo) {
+    // Check if it's the new format (objects with country and percent)
+    if (typeof item === "object" && item !== null) {
+      if (!item.country || typeof item.country !== "string") {
+        return {
+          valid: false,
+          error: "Each geo item must have a 'country' string field",
+        };
+      }
+      if (
+        typeof item.percent !== "number" ||
+        item.percent < 0 ||
+        item.percent > 1
+      ) {
+        return {
+          valid: false,
+          error:
+            "Each geo item must have a 'percent' number field between 0 and 1",
+        };
+      }
+      totalPercent += item.percent;
+    } else {
+      // Old format (strings) is not allowed for new campaigns
+      return {
+        valid: false,
+        error:
+          "geo items must be objects with 'country' and 'percent' fields. Old string format is no longer supported for new campaigns.",
+      };
+    }
+  }
+
+  // Allow some tolerance for floating point precision
+  if (Math.abs(totalPercent - 1) > 0.01) {
+    return { valid: false, error: "Total percentage must equal 1.0 (100%)" };
+  }
+
+  return { valid: true };
+}
+
 // Helper function to create clean campaign response (hiding implementation details)
-function createCleanCampaignResponse(campaign, includeStats = false, vendorStats = null) {
+function createCleanCampaignResponse(
+  campaign,
+  includeStats = false,
+  vendorStats = null
+) {
   return {
     id: campaign._id,
     title: campaign.title,
@@ -31,20 +85,26 @@ function createCleanCampaignResponse(campaign, includeStats = false, vendorStats
     archived_at: campaign.archived_at,
     delete_eligible: campaign.delete_eligible,
     // User-friendly status
-    status: campaign.state === "paused" ? "paused" : 
-            campaign.state === "created" ? "active" : 
-            campaign.state === "archived" ? "archived" : campaign.state,
+    status:
+      campaign.state === "paused"
+        ? "paused"
+        : campaign.state === "created"
+        ? "active"
+        : campaign.state === "archived"
+        ? "archived"
+        : campaign.state,
     // Include stats only when requested
-    ...(includeStats && vendorStats && {
-      stats: {
-        totalHits: vendorStats.totalHits || 0,
-        totalVisits: vendorStats.totalVisits || 0,
-        speed: vendorStats.speed || 0,
-        status: campaign.state === "paused" ? "paused" : "active",
-        dailyHits: vendorStats.hits || [],
-        dailyVisits: vendorStats.visits || [],
-      }
-    }),
+    ...(includeStats &&
+      vendorStats && {
+        stats: {
+          totalHits: vendorStats.totalHits || 0,
+          totalVisits: vendorStats.totalVisits || 0,
+          speed: vendorStats.speed || 0,
+          status: campaign.state === "paused" ? "paused" : "active",
+          dailyHits: vendorStats.hits || [],
+          dailyVisits: vendorStats.visits || [],
+        },
+      }),
   };
 }
 
@@ -71,6 +131,19 @@ router.post("/", auth(), async (req, res) => {
     if (!body.url || typeof body.url !== "string" || !body.url.trim()) {
       logger.error("Invalid URL provided", { userId, url: body.url });
       return res.status(400).json({ error: "url required" });
+    }
+
+    // Validate geo format if provided
+    if (body.geo) {
+      const geoValidation = validateGeoFormat(body.geo);
+      if (!geoValidation.valid) {
+        logger.error("Invalid geo format", {
+          userId,
+          geo: body.geo,
+          error: geoValidation.error,
+        });
+        return res.status(400).json({ error: geoValidation.error });
+      }
     }
 
     // Check user's available hits before creating campaign
@@ -152,7 +225,7 @@ router.post("/", auth(), async (req, res) => {
         desktop_rate: merged.desktop_rate || 0,
         auto_renew: merged.auto_renew || "true",
         geo_type: merged.geo_type || "global",
-        geo: merged.geo && merged.geo.codes ? merged.geo.codes.join(",") : "",
+        geo: merged.geo ? JSON.stringify(merged.geo) : "",
         shortener: merged.shortener || "",
         rss_feed: merged.rss_feed || "",
         ga_id: merged.ga_id || "",
@@ -187,17 +260,33 @@ router.post("/", auth(), async (req, res) => {
             resumeResp = { error: resumeErr.message };
           }
         }
-        // Save to DB
+        // Save to DB with proper geo format handling
         const projectId =
           vendorResp["new-id"] || vendorResp.id || vendorResp.project_id;
+
+        // Handle countries/geo data properly for both old and new formats
+        let countriesData = [];
+        if (merged.geo) {
+          if (Array.isArray(merged.geo)) {
+            // New format: array of objects with country and percent
+            countriesData = merged.geo;
+          } else if (merged.geo.codes && Array.isArray(merged.geo.codes)) {
+            // Old format: geo object with codes array
+            countriesData = merged.geo.codes;
+          }
+        } else if (merged.countries) {
+          // Direct countries field
+          countriesData = merged.countries;
+        }
+
         const camp = new Campaign({
           user: userId,
           title: sparkPayload.title,
           urls: merged.urls,
           duration_min: merged.duration[0],
           duration_max: merged.duration[1],
-          countries: merged.geo.codes,
-          rule: merged.geo.rule,
+          countries: countriesData,
+          rule: merged.rule || "any",
           macros: merged.macros,
           is_adult: merged.is_adult,
           is_coin_mining: merged.is_coin_mining,
@@ -392,152 +481,10 @@ router.get("/", auth(), async (req, res) => {
       },
     });
 
-    // Fetch vendor stats for each campaign
-    const cleanCampaigns = await Promise.all(
-      campaigns.map(async (campaign) => {
-        let vendorStats = null;
-
-        // Fetch SparkTraffic stats
-        if (campaign.spark_traffic_project_id) {
-          try {
-            const axios = require("axios");
-            const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
-
-            // Try to get specific project stats
-            const now = new Date();
-            const createdDate = campaign.createdAt
-              ? campaign.createdAt.toISOString().split("T")[0]
-              : now.toISOString().split("T")[0];
-
-            // Get stats data
-            const statsResp = await axios.post(
-              "https://v2.sparktraffic.com/get-website-traffic-project-stats",
-              null,
-              {
-                headers: {
-                  "Content-Type": "application/json",
-                  API_KEY,
-                },
-                params: {
-                  unique_id: campaign.spark_traffic_project_id,
-                  from: createdDate,
-                  to: now.toISOString().split("T")[0],
-                },
-              }
-            );
-
-            // Get actual project details to fetch real speed and settings
-            let projectDetails = null;
-            try {
-              // Try to get current project settings by using modify endpoint with current unique_id only
-              // This often returns current project state in the response
-              const projectResp = await axios.post(
-                "https://v2.sparktraffic.com/modify-website-traffic-project",
-                {
-                  unique_id: campaign.spark_traffic_project_id,
-                  // Not changing anything, just querying current state
-                },
-                {
-                  headers: {
-                    "Content-Type": "application/json",
-                    API_KEY,
-                  },
-                }
-              );
-              
-              // Check if the response contains current project settings
-              if (projectResp.data && projectResp.data.speed !== undefined) {
-                projectDetails = projectResp.data;
-              }
-            } catch (projectErr) {
-              // Silently continue if project details fetch fails
-            }
-
-            if (statsResp.data) {
-              // Calculate total hits from stats
-              let totalHits = 0;
-              let totalVisits = 0;
-
-              if (Array.isArray(statsResp.data.hits)) {
-                statsResp.data.hits.forEach((hitData) => {
-                  Object.values(hitData).forEach((count) => {
-                    totalHits += parseInt(count) || 0;
-                  });
-                });
-              }
-
-              if (Array.isArray(statsResp.data.visits)) {
-                statsResp.data.visits.forEach((visitData) => {
-                  Object.values(visitData).forEach((count) => {
-                    totalVisits += parseInt(count) || 0;
-                  });
-                });
-              }
-
-              vendorStats = {
-                ...statsResp.data,
-                totalHits,
-                totalVisits,
-                // Use actual speed from project details, fallback to estimate
-                speed: projectDetails?.speed || (campaign.state === "paused" ? 0 : 200),
-                // Include other project settings if available
-                ...(projectDetails && {
-                  projectDetails: {
-                    speed: projectDetails.speed,
-                    size: projectDetails.size,
-                    auto_renew: projectDetails.auto_renew,
-                    geo_type: projectDetails.geo_type,
-                    traffic_type: projectDetails.traffic_type,
-                    // Add other relevant fields you want to show
-                  },
-                }),
-              };
-            } else {
-              vendorStats = {
-                error: "No data returned from SparkTraffic",
-                response: statsResp.data,
-              };
-            }
-          } catch (err) {
-            logger.error("Failed to fetch SparkTraffic vendor stats for campaign list", {
-              userId: req.user.id,
-              campaignId: campaign._id,
-              sparkTrafficProjectId: campaign.spark_traffic_project_id,
-              error: err.message,
-              status: err.response?.status,
-              responseData: err.response?.data,
-            });
-            vendorStats = {
-              error: "Failed to fetch vendor stats",
-              details: err.message,
-              status: err.response?.status,
-              apiResponse: err.response?.data,
-            };
-          }
-        }
-
-        // Fetch 9Hits stats
-        if (campaign.nine_hits_campaign_id) {
-          try {
-            const nine = require("../services/nineHits");
-            const statsResp = await nine.siteGet({ id: campaign.nine_hits_campaign_id });
-            vendorStats = statsResp;
-          } catch (err) {
-            logger.error("Failed to fetch 9Hits vendor stats for campaign list", {
-              userId: req.user.id,
-              campaignId: campaign._id,
-              nineHitsId: campaign.nine_hits_campaign_id,
-              error: err.message,
-            });
-            vendorStats = {
-              error: "Failed to fetch vendor stats",
-              details: err.message,
-            };
-          }
-        }
-
-        return createCleanCampaignResponse(campaign, true, vendorStats);
-      })
+    // Clean up campaign data to hide implementation details
+    const cleanCampaigns = campaigns.map((campaign) =>
+      createCleanCampaignResponse(campaign)
+    );
     );
 
     res.json({
@@ -608,152 +555,10 @@ router.get("/archived", auth(), async (req, res) => {
       is_archived: true,
     }).sort({ archived_at: -1 });
 
-    // Fetch vendor stats for each archived campaign
-    const cleanArchivedCampaigns = await Promise.all(
-      archivedCampaigns.map(async (campaign) => {
-        let vendorStats = null;
-
-        // Fetch SparkTraffic stats
-        if (campaign.spark_traffic_project_id) {
-          try {
-            const axios = require("axios");
-            const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
-
-            // Try to get specific project stats
-            const now = new Date();
-            const createdDate = campaign.createdAt
-              ? campaign.createdAt.toISOString().split("T")[0]
-              : now.toISOString().split("T")[0];
-
-            // Get stats data
-            const statsResp = await axios.post(
-              "https://v2.sparktraffic.com/get-website-traffic-project-stats",
-              null,
-              {
-                headers: {
-                  "Content-Type": "application/json",
-                  API_KEY,
-                },
-                params: {
-                  unique_id: campaign.spark_traffic_project_id,
-                  from: createdDate,
-                  to: now.toISOString().split("T")[0],
-                },
-              }
-            );
-
-            // Get actual project details to fetch real speed and settings
-            let projectDetails = null;
-            try {
-              // Try to get current project settings by using modify endpoint with current unique_id only
-              // This often returns current project state in the response
-              const projectResp = await axios.post(
-                "https://v2.sparktraffic.com/modify-website-traffic-project",
-                {
-                  unique_id: campaign.spark_traffic_project_id,
-                  // Not changing anything, just querying current state
-                },
-                {
-                  headers: {
-                    "Content-Type": "application/json",
-                    API_KEY,
-                  },
-                }
-              );
-              
-              // Check if the response contains current project settings
-              if (projectResp.data && projectResp.data.speed !== undefined) {
-                projectDetails = projectResp.data;
-              }
-            } catch (projectErr) {
-              // Silently continue if project details fetch fails
-            }
-
-            if (statsResp.data) {
-              // Calculate total hits from stats
-              let totalHits = 0;
-              let totalVisits = 0;
-
-              if (Array.isArray(statsResp.data.hits)) {
-                statsResp.data.hits.forEach((hitData) => {
-                  Object.values(hitData).forEach((count) => {
-                    totalHits += parseInt(count) || 0;
-                  });
-                });
-              }
-
-              if (Array.isArray(statsResp.data.visits)) {
-                statsResp.data.visits.forEach((visitData) => {
-                  Object.values(visitData).forEach((count) => {
-                    totalVisits += parseInt(count) || 0;
-                  });
-                });
-              }
-
-              vendorStats = {
-                ...statsResp.data,
-                totalHits,
-                totalVisits,
-                // Use actual speed from project details, fallback to estimate
-                speed: projectDetails?.speed || (campaign.state === "paused" ? 0 : 200),
-                // Include other project settings if available
-                ...(projectDetails && {
-                  projectDetails: {
-                    speed: projectDetails.speed,
-                    size: projectDetails.size,
-                    auto_renew: projectDetails.auto_renew,
-                    geo_type: projectDetails.geo_type,
-                    traffic_type: projectDetails.traffic_type,
-                    // Add other relevant fields you want to show
-                  },
-                }),
-              };
-            } else {
-              vendorStats = {
-                error: "No data returned from SparkTraffic",
-                response: statsResp.data,
-              };
-            }
-          } catch (err) {
-            logger.error("Failed to fetch SparkTraffic vendor stats for archived campaign list", {
-              userId: req.user.id,
-              campaignId: campaign._id,
-              sparkTrafficProjectId: campaign.spark_traffic_project_id,
-              error: err.message,
-              status: err.response?.status,
-              responseData: err.response?.data,
-            });
-            vendorStats = {
-              error: "Failed to fetch vendor stats",
-              details: err.message,
-              status: err.response?.status,
-              apiResponse: err.response?.data,
-            };
-          }
-        }
-
-        // Fetch 9Hits stats
-        if (campaign.nine_hits_campaign_id) {
-          try {
-            const nine = require("../services/nineHits");
-            const statsResp = await nine.siteGet({ id: campaign.nine_hits_campaign_id });
-            vendorStats = statsResp;
-          } catch (err) {
-            logger.error("Failed to fetch 9Hits vendor stats for archived campaign list", {
-              userId: req.user.id,
-              campaignId: campaign._id,
-              nineHitsId: campaign.nine_hits_campaign_id,
-              error: err.message,
-            });
-            vendorStats = {
-              error: "Failed to fetch vendor stats",
-              details: err.message,
-            };
-          }
-        }
-
-        return createCleanCampaignResponse(campaign, true, vendorStats);
-      })
+    // Clean up archived campaign data
+    const cleanArchivedCampaigns = archivedCampaigns.map((campaign) =>
+      createCleanCampaignResponse(campaign)
+    );
     );
 
     res.json({
@@ -852,7 +657,7 @@ router.get("/:id", auth(), async (req, res) => {
               },
             }
           );
-          
+
           // Check if the response contains current project settings
           if (projectResp.data && projectResp.data.speed !== undefined) {
             projectDetails = projectResp.data;
@@ -1260,6 +1065,20 @@ router.post("/:id/modify", auth(), async (req, res) => {
       "is_coin_mining",
       "metadata",
     ];
+    // Validate geo format if provided
+    if (req.body.countries) {
+      const geoValidation = validateGeoFormat(req.body.countries);
+      if (!geoValidation.valid) {
+        logger.error("Invalid geo format in modify", {
+          userId: req.user.id,
+          campaignId: req.params.id,
+          geo: req.body.countries,
+          error: geoValidation.error,
+        });
+        return res.status(400).json({ error: geoValidation.error });
+      }
+    }
+
     updatable.forEach((f) => {
       if (req.body[f] !== undefined) c[f] = req.body[f];
     });
@@ -1342,7 +1161,12 @@ router.post("/:id/modify", auth(), async (req, res) => {
           modifyPayload.desktop_rate = req.body.desktop_rate;
         if (req.body.auto_renew) modifyPayload.auto_renew = req.body.auto_renew;
         if (req.body.geo_type) modifyPayload.geo_type = req.body.geo_type;
-        if (req.body.geo) modifyPayload.geo = req.body.geo;
+        if (req.body.geo) {
+          // Handle new geo format: array of objects with country and percent
+          modifyPayload.geo = Array.isArray(req.body.geo)
+            ? JSON.stringify(req.body.geo)
+            : req.body.geo;
+        }
         if (req.body.shortener) modifyPayload.shortener = req.body.shortener;
         if (req.body.rss_feed) modifyPayload.rss_feed = req.body.rss_feed;
         if (req.body.ga_id) modifyPayload.ga_id = req.body.ga_id;
@@ -1421,18 +1245,18 @@ router.post("/:id/modify", auth(), async (req, res) => {
 
     // Return response with clean campaign data
     const cleanCampaign = createCleanCampaignResponse(c);
-    
+
     if (cleanVendorResp && cleanVendorResp.status === "ok") {
       res.json({
         status: "ok",
         campaign: cleanCampaign,
-        message: "Campaign updated successfully"
+        message: "Campaign updated successfully",
       });
     } else {
       res.json({
         ok: true,
         campaign: cleanCampaign,
-        message: "Campaign updated successfully"
+        message: "Campaign updated successfully",
       });
     }
   } catch (err) {
@@ -2283,7 +2107,7 @@ router.post("/:id/reset-counters", auth(), async (req, res) => {
     // Reset both hit and visit counters to current SparkTraffic totals
     let totalCurrentHits = 0;
     let totalCurrentVisits = 0;
-    
+
     try {
       const axios = require("axios");
       const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
@@ -2338,7 +2162,7 @@ router.post("/:id/reset-counters", auth(), async (req, res) => {
 
     const oldHitsTotal = c.total_hits_counted || 0;
     const oldVisitsTotal = c.total_visits_counted || 0;
-    
+
     c.total_hits_counted = totalCurrentHits;
     c.total_visits_counted = totalCurrentVisits;
     c.last_stats_check = new Date();
@@ -2378,6 +2202,90 @@ router.post("/:id/reset-counters", auth(), async (req, res) => {
     logger.error("Counter reset failed", {
       userId: req.user.id,
       campaignId: req.params.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Migrate existing campaigns to new geo format (admin only)
+router.post("/admin/migrate-geo-format", auth("admin"), async (req, res) => {
+  try {
+    const campaigns = await Campaign.find({
+      countries: { $exists: true, $not: { $size: 0 } },
+    });
+
+    let migratedCount = 0;
+    let skippedCount = 0;
+    let errors = [];
+
+    for (const campaign of campaigns) {
+      try {
+        // Check if countries is already in new format
+        if (
+          Array.isArray(campaign.countries) &&
+          campaign.countries.length > 0
+        ) {
+          const firstItem = campaign.countries[0];
+
+          // If it's already in new format (has country and percent), skip
+          if (
+            typeof firstItem === "object" &&
+            firstItem.country &&
+            firstItem.percent !== undefined
+          ) {
+            skippedCount++;
+            continue;
+          }
+
+          // If it's old format (array of strings), convert to empty array for now
+          if (typeof firstItem === "string") {
+            campaign.countries = []; // Reset to empty array - users can set new geo targeting
+            await campaign.save();
+            migratedCount++;
+            logger.campaign("Campaign geo format migrated", {
+              campaignId: campaign._id,
+              oldFormat: "string_array",
+              newFormat: "empty_array",
+            });
+          }
+        }
+      } catch (err) {
+        errors.push({
+          campaignId: campaign._id,
+          error: err.message,
+        });
+        logger.error("Failed to migrate campaign geo format", {
+          campaignId: campaign._id,
+          error: err.message,
+        });
+      }
+    }
+
+    logger.campaign("Geo format migration completed", {
+      adminId: req.user.id,
+      totalCampaigns: campaigns.length,
+      migratedCount,
+      skippedCount,
+      errorsCount: errors.length,
+    });
+
+    res.json({
+      ok: true,
+      message: "Geo format migration completed",
+      results: {
+        totalCampaigns: campaigns.length,
+        migratedCount,
+        skippedCount,
+        errorsCount: errors.length,
+        errors: errors.slice(0, 10), // Show first 10 errors only
+      },
+      info: "Old string-based geo targeting has been reset. Users should configure new geo targeting with country/percent format.",
+    });
+  } catch (err) {
+    logger.error("Geo format migration failed", {
+      adminId: req.user.id,
       error: err.message,
       stack: err.stack,
     });

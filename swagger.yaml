@@ -1,8 +1,8 @@
 openapi: 3.0.0
 info:
-  title: 9Hits Backend API
-  version: 1.0.0
-  description: API documentation for 9Hits backend wrapper
+  title: TrafficBox Backend API
+  version: 2.0.0
+  description: API documentation for TrafficBox backend - SparkTraffic integration with automated credit system
 servers:
   - url: http://localhost:5000
 paths:
@@ -93,9 +93,41 @@ paths:
           description: Invalid credentials
         "500":
           description: Server error
+  /api/auth/register-admin:
+    post:
+      summary: Register an admin user (for testing)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+                firstName:
+                  type: string
+                lastName:
+                  type: string
+                dob:
+                  type: string
+                  format: date
+              required:
+                - email
+                - password
+      responses:
+        "200":
+          description: Admin user created successfully
+        "400":
+          description: Email already registered
+        "500":
+          description: Server error
   /api/campaigns:
     post:
       summary: Create a campaign
+      description: Create a new traffic campaign using SparkTraffic with geo targeting
       security:
         - bearerAuth: []
       requestBody:
@@ -107,30 +139,72 @@ paths:
               properties:
                 title:
                   type: string
+                  example: "My Campaign"
+                url:
+                  type: string
+                  example: "https://example.com"
+                  description: "Primary URL for the campaign"
                 urls:
                   type: array
                   items:
                     type: string
-                duration_min:
-                  type: integer
-                duration_max:
-                  type: integer
-                countries:
+                  example: ["https://example.com"]
+                duration:
                   type: array
                   items:
-                    type: string
-                rule:
+                    type: integer
+                  example: [5, 15]
+                  description: "Duration range in minutes [min, max]"
+                geo:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      country:
+                        type: string
+                        description: Two-letter country code (e.g., "US", "AE", "IN")
+                      percent:
+                        type: number
+                        format: float
+                        minimum: 0
+                        maximum: 1
+                        description: Percentage of traffic for this country (0-1, all percentages must sum to 1.0)
+                    required:
+                      - country
+                      - percent
+                  example:
+                    - country: "US"
+                      percent: 0.34
+                    - country: "AE"
+                      percent: 0.33
+                    - country: "IN"
+                      percent: 0.33
+                  description: "JSON array specifying country targeting with percentages. Each object contains a country code and percentage. All percentages must sum to 1.0."
+                speed:
+                  type: integer
+                  example: 200
+                  description: "Campaign speed (0-1000)"
+                traffic_type:
                   type: string
-                  enum: [all, any, except]
-                macros:
-                  type: string
+                  example: "direct"
+                  enum: [direct, organic, social, referral]
+                maxHits:
+                  type: integer
+                  example: 100
+                  description: "Maximum hits for the campaign"
+                is_adult:
+                  type: boolean
+                  default: false
+                is_coin_mining:
+                  type: boolean
+                  default: false
                 metadata:
                   type: object
               required:
-                - urls
+                - url
       responses:
         "200":
-          description: Campaign created
+          description: Campaign created successfully
           content:
             application/json:
               schema:
@@ -138,17 +212,203 @@ paths:
                 properties:
                   ok:
                     type: boolean
+                    example: true
                   campaign:
-                    $ref: "#/components/schemas/Campaign"
-                  nineRaw:
+                    $ref: "#/components/schemas/CleanCampaign"
+                  userStats:
                     type: object
+                    properties:
+                      hitsDeducted:
+                        type: integer
+                      remainingHits:
+                        type: integer
+                  message:
+                    type: string
+                    example: "Campaign created successfully"
         "400":
-          description: Bad request
+          description: Bad request (validation errors, insufficient hits, etc.)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    example: "geo items must be objects with 'country' and 'percent' fields"
         "500":
           description: Server error
+    get:
+      summary: Get all campaigns for user
+      description: Retrieve all campaigns for the authenticated user with pagination
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+          description: Page number
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+          description: Number of campaigns per page
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [created, paused, archived]
+          description: Filter by campaign status
+        - in: query
+          name: vendor
+          schema:
+            type: string
+            enum: [sparkTraffic, nineHits]
+          description: Filter by vendor
+        - in: query
+          name: include_archived
+          schema:
+            type: boolean
+            default: false
+          description: Include archived campaigns
+      responses:
+        "200":
+          description: Campaigns retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  campaigns:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CleanCampaign"
+                  pagination:
+                    type: object
+                    properties:
+                      page:
+                        type: integer
+                      limit:
+                        type: integer
+                      total:
+                        type: integer
+                      pages:
+                        type: integer
+                      hasNext:
+                        type: boolean
+                      hasPrev:
+                        type: boolean
+  /api/campaigns/user/stats:
+    get:
+      summary: Get user statistics
+      description: Get current user's credits and available hits
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User stats retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  user:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      email:
+                        type: string
+                      firstName:
+                        type: string
+                      lastName:
+                        type: string
+                      credits:
+                        type: number
+                      availableHits:
+                        type: number
+  /api/campaigns/archived:
+    get:
+      summary: Get archived campaigns
+      description: Retrieve all archived campaigns for the authenticated user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Archived campaigns retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  campaigns:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/CleanCampaign"
+                  count:
+                    type: integer
   /api/campaigns/{id}:
     get:
       summary: Get campaign by ID
+      description: Get detailed campaign information with stats
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+        - in: query
+          name: include_archived
+          schema:
+            type: boolean
+            default: false
+          description: Include archived campaign access
+      responses:
+        "200":
+          description: Campaign found
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/CleanCampaign"
+                  - type: object
+                    properties:
+                      stats:
+                        type: object
+                        properties:
+                          totalHits:
+                            type: number
+                          totalVisits:
+                            type: number
+                          speed:
+                            type: number
+                          status:
+                            type: string
+                          dailyHits:
+                            type: array
+                          dailyVisits:
+                            type: array
+        "403":
+          description: Forbidden
+        "404":
+          description: Not found
+        "500":
+          description: Server error
+  /api/campaigns/{id}/pause:
+    post:
+      summary: Pause campaign
+      description: Pause a running campaign (sets speed to 0)
       security:
         - bearerAuth: []
       parameters:
@@ -160,17 +420,415 @@ paths:
           description: Campaign ID
       responses:
         "200":
-          description: Campaign found
+          description: Campaign paused successfully
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Campaign"
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  campaign:
+                    $ref: "#/components/schemas/Campaign"
+                  vendorResp:
+                    type: object
         "403":
           description: Forbidden
         "404":
-          description: Not found
+          description: Campaign not found
+  /api/campaigns/{id}/resume:
+    post:
+      summary: Resume campaign
+      description: Resume a paused campaign (sets speed to 200)
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      responses:
+        "200":
+          description: Campaign resumed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  campaign:
+                    $ref: "#/components/schemas/Campaign"
+                  vendorResp:
+                    type: object
+        "403":
+          description: Forbidden
+        "404":
+          description: Campaign not found
+  /api/campaigns/{id}/modify:
+    post:
+      summary: Modify campaign
+      description: Update campaign settings including geo targeting
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                url:
+                  type: string
+                urls:
+                  type: array
+                  items:
+                    type: string
+                countries:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      country:
+                        type: string
+                      percent:
+                        type: number
+                        format: float
+                        minimum: 0
+                        maximum: 1
+                    required:
+                      - country
+                      - percent
+                  example:
+                    - country: "GB"
+                      percent: 0.5
+                    - country: "CA"
+                      percent: 0.3
+                    - country: "AU"
+                      percent: 0.2
+                speed:
+                  type: integer
+                  minimum: 0
+                  maximum: 1000
+                traffic_type:
+                  type: string
+                  enum: [direct, organic, social, referral]
+      responses:
+        "200":
+          description: Campaign updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  campaign:
+                    $ref: "#/components/schemas/CleanCampaign"
+                  message:
+                    type: string
+        "400":
+          description: Invalid geo format or other validation errors
+        "403":
+          description: Forbidden
+        "404":
+          description: Campaign not found
+  /api/campaigns/{id}/stats:
+    get:
+      summary: Get campaign statistics
+      description: Get detailed daily hits and visits statistics for a campaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date
+          description: Start date (YYYY-MM-DD)
+          example: "2024-01-01"
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date
+          description: End date (YYYY-MM-DD)
+          example: "2024-01-31"
+      responses:
+        "200":
+          description: Campaign statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  campaign:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      title:
+                        type: string
+                      spark_traffic_project_id:
+                        type: string
+                  dateRange:
+                    type: object
+                    properties:
+                      from:
+                        type: string
+                        format: date
+                      to:
+                        type: string
+                        format: date
+                  stats:
+                    type: object
+                    description: Raw SparkTraffic statistics data
+  /api/campaigns/{id}/credit-debug:
+    get:
+      summary: Debug campaign credit state
+      description: Get detailed information about campaign credit processing without making changes
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      responses:
+        "200":
+          description: Credit debug information retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  campaign:
+                    type: object
+                  user:
+                    type: object
+                  currentStats:
+                    type: object
+                  analysis:
+                    type: object
+                  info:
+                    type: string
+        "403":
+          description: Forbidden
+        "404":
+          description: Campaign not found
+  /api/campaigns/{id}/test-credits:
+    post:
+      summary: Test credit processing
+      description: Process any new hits and show what would be charged
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      responses:
+        "200":
+          description: Credit processing test completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                  result:
+                    type: object
+                  currentState:
+                    type: object
+                  explanation:
+                    type: string
+                  info:
+                    type: string
+        "403":
+          description: Forbidden
+        "404":
+          description: Campaign not found
+  /api/campaigns/{id}/toggle-credit-deduction:
+    post:
+      summary: Toggle credit deduction
+      description: Enable or disable automatic credit deduction for a campaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      responses:
+        "200":
+          description: Credit deduction toggled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                  campaign:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                      title:
+                        type: string
+                      credit_deduction_enabled:
+                        type: boolean
+        "403":
+          description: Forbidden
+        "404":
+          description: Campaign not found
+  /api/campaigns/admin/migrate-geo-format:
+    post:
+      summary: Migrate geo format (Admin only)
+      description: Migrate existing campaigns from old string-based geo format to new object format
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Migration completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                  results:
+                    type: object
+                    properties:
+                      totalCampaigns:
+                        type: integer
+                      migratedCount:
+                        type: integer
+                      skippedCount:
+                        type: integer
+                      errorsCount:
+                        type: integer
+                      errors:
+                        type: array
+                  info:
+                    type: string
+        "403":
+          description: Admin access required
         "500":
           description: Server error
+  /api/campaigns/admin/process-all-credits:
+    post:
+      summary: Process all campaign credits (Admin only)
+      description: Manually trigger credit processing for all campaigns
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Bulk credit processing completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  message:
+                    type: string
+                  result:
+                    type: object
+        "403":
+          description: Admin access required
+        "500":
+          description: Server error
+  /api/me:
+    get:
+      summary: Get user profile
+      description: Get the current user's profile information
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: User profile retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  email:
+                    type: string
+                  firstName:
+                    type: string
+                  lastName:
+                    type: string
+                  dob:
+                    type: string
+                    format: date
+                  role:
+                    type: string
+                  cashBalance:
+                    type: number
+                  createdAt:
+                    type: string
+                    format: date-time
+                  updatedAt:
+                    type: string
+                    format: date-time
+        "404":
+          description: User not found
+        "500":
+          description: Server error
+  /api/me/logout:
+    post:
+      summary: Logout user
+      description: Logout the current user (client-side token deletion for JWT)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Logout message
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "Logged out. Please delete your token on the client."
   /api/account:
     get:
       summary: Get 9Hits profile
@@ -288,8 +946,86 @@ components:
           type: string
           format: date-time
           example: "2023-01-01T00:00:00.000Z"
+    CleanCampaign:
+      type: object
+      description: "Clean campaign response hiding implementation details"
+      properties:
+        id:
+          type: string
+          example: "507f1f77bcf86cd799439011"
+        title:
+          type: string
+          example: "My Traffic Campaign"
+        urls:
+          type: array
+          items:
+            type: string
+          example: ["https://example.com"]
+        duration_min:
+          type: integer
+          example: 5
+        duration_max:
+          type: integer
+          example: 15
+        countries:
+          type: array
+          items:
+            type: object
+            properties:
+              country:
+                type: string
+                description: Two-letter country code
+              percent:
+                type: number
+                format: float
+                description: Percentage of traffic for this country (0-1)
+          example:
+            - country: "US"
+              percent: 0.5
+            - country: "GB"
+              percent: 0.3
+            - country: "CA"
+              percent: 0.2
+        rule:
+          type: string
+          enum: [all, any, except]
+          example: "any"
+        macros:
+          type: string
+          example: ""
+        is_adult:
+          type: boolean
+          example: false
+        is_coin_mining:
+          type: boolean
+          example: false
+        state:
+          type: string
+          example: "created"
+        status:
+          type: string
+          enum: [active, paused, archived]
+          example: "active"
+          description: "User-friendly status"
+        is_archived:
+          type: boolean
+          example: false
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+        delete_eligible:
+          type: boolean
+          example: false
     Campaign:
       type: object
+      description: "Full campaign object (internal use)"
       properties:
         _id:
           type: string
@@ -306,41 +1042,89 @@ components:
         duration_max:
           type: integer
         countries:
-          type: array
-          items:
-            type: string
+          oneOf:
+            - type: array
+              items:
+                type: string
+              description: "Legacy format: array of country codes"
+            - type: array
+              items:
+                type: object
+                properties:
+                  country:
+                    type: string
+                  percent:
+                    type: number
+                    format: float
+              description: "New format: array of objects with country and percent"
         rule:
           type: string
         macros:
           type: string
+        spark_traffic_project_id:
+          type: string
+          description: "SparkTraffic project ID"
         nine_hits_campaign_id:
           type: integer
+          description: "9Hits campaign ID (legacy)"
         state:
           type: string
+        is_archived:
+          type: boolean
+        archived_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_stats_check:
+          type: string
+          format: date-time
+          nullable: true
+        total_hits_counted:
+          type: number
+          default: 0
+        total_visits_counted:
+          type: number
+          default: 0
+        credit_deduction_enabled:
+          type: boolean
+          default: true
         metadata:
           type: object
         createdAt:
           type: string
+          format: date-time
         updatedAt:
           type: string
+          format: date-time
     Website:
       type: object
       properties:
         _id:
           type: string
+          example: "507f1f77bcf86cd799439011"
         user:
           type: string
+          example: "507f1f77bcf86cd799439011"
         url:
           type: string
+          example: "https://example.com"
         title:
           type: string
+          example: "My Website"
         description:
           type: string
+          example: "Description of my website"
         isActive:
           type: boolean
+          default: true
+          example: true
         metadata:
           type: object
         createdAt:
           type: string
+          format: date-time
+          example: "2023-01-01T00:00:00.000Z"
         updatedAt:
           type: string
+          format: date-time
+          example: "2023-01-01T00:00:00.000Z"

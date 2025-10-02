@@ -5,10 +5,10 @@ const swaggerUi = require("swagger-ui-express");
 const swaggerDefinition = {
   openapi: "3.0.0",
   info: {
-    title: "TrafficBox API",
-    version: "1.0.0",
+    title: "TrafficBox Backend API",
+    version: "2.0.0",
     description:
-      "Comprehensive API for TrafficBox campaign management system with SparkTraffic and 9Hits integration",
+      "Comprehensive API for TrafficBox campaign management system with SparkTraffic integration, automated credit deduction, and new geo format support",
     contact: {
       name: "TrafficBox Support",
       email: "support@trafficbox.com",
@@ -138,9 +138,39 @@ const swaggerDefinition = {
           countries: {
             type: "array",
             items: {
-              type: "string",
+              oneOf: [
+                {
+                  type: "string",
+                  description: "Country code (legacy format)",
+                },
+                {
+                  type: "object",
+                  required: ["country", "percent"],
+                  properties: {
+                    country: {
+                      type: "string",
+                      description: "Country code (e.g., 'US', 'GB', 'DE')",
+                    },
+                    percent: {
+                      type: "number",
+                      minimum: 0,
+                      maximum: 1,
+                      description:
+                        "Percentage of traffic (0.0 to 1.0, must sum to 1.0)",
+                    },
+                  },
+                  description:
+                    "Country with percentage allocation (new format)",
+                },
+              ],
             },
-            description: "Target countries",
+            description:
+              "Target countries - supports both legacy string format and new object format with percentages",
+            example: [
+              { country: "US", percent: 0.34 },
+              { country: "AE", percent: 0.33 },
+              { country: "IN", percent: 0.33 },
+            ],
           },
           rule: {
             type: "string",
@@ -236,6 +266,282 @@ const swaggerDefinition = {
             type: "string",
             format: "date-time",
             description: "Campaign update timestamp",
+          },
+        },
+      },
+      CleanCampaign: {
+        type: "object",
+        description:
+          "Clean campaign response that hides vendor implementation details",
+        properties: {
+          id: {
+            type: "string",
+            description: "Campaign ID",
+          },
+          title: {
+            type: "string",
+            description: "Campaign title",
+          },
+          urls: {
+            type: "array",
+            items: {
+              type: "string",
+              format: "url",
+            },
+            description: "Target URLs",
+          },
+          duration_min: {
+            type: "number",
+            description: "Minimum duration in seconds",
+          },
+          duration_max: {
+            type: "number",
+            description: "Maximum duration in seconds",
+          },
+          countries: {
+            type: "array",
+            items: {
+              oneOf: [
+                {
+                  type: "string",
+                  description: "Country code (legacy format)",
+                },
+                {
+                  type: "object",
+                  required: ["country", "percent"],
+                  properties: {
+                    country: {
+                      type: "string",
+                      description: "Country code",
+                    },
+                    percent: {
+                      type: "number",
+                      minimum: 0,
+                      maximum: 1,
+                      description: "Traffic percentage",
+                    },
+                  },
+                },
+              ],
+            },
+            description: "Target countries with new geo format support",
+          },
+          rule: {
+            type: "string",
+            enum: ["all", "any", "except"],
+            description: "Country targeting rule",
+          },
+          macros: {
+            type: "string",
+            description: "Campaign macros",
+          },
+          is_adult: {
+            type: "boolean",
+            description: "Adult content flag",
+          },
+          is_coin_mining: {
+            type: "boolean",
+            description: "Coin mining flag",
+          },
+          state: {
+            type: "string",
+            description: "Campaign state",
+          },
+          is_archived: {
+            type: "boolean",
+            description: "Archive status",
+          },
+          status: {
+            type: "string",
+            description: "User-friendly status (active, paused, archived)",
+          },
+          createdAt: {
+            type: "string",
+            format: "date-time",
+            description: "Creation timestamp",
+          },
+          updatedAt: {
+            type: "string",
+            format: "date-time",
+            description: "Update timestamp",
+          },
+          archived_at: {
+            type: "string",
+            format: "date-time",
+            description: "Archive timestamp",
+          },
+          delete_eligible: {
+            type: "boolean",
+            description: "Eligible for permanent deletion",
+          },
+          stats: {
+            type: "object",
+            description: "Campaign statistics (only when requested)",
+            properties: {
+              totalHits: {
+                type: "number",
+                description: "Total hits received",
+              },
+              totalVisits: {
+                type: "number",
+                description: "Total visits received",
+              },
+              speed: {
+                type: "number",
+                description: "Current traffic speed",
+              },
+              status: {
+                type: "string",
+                description: "Current status",
+              },
+              dailyHits: {
+                type: "array",
+                items: {
+                  type: "object",
+                },
+                description: "Daily hits breakdown",
+              },
+              dailyVisits: {
+                type: "array",
+                items: {
+                  type: "object",
+                },
+                description: "Daily visits breakdown",
+              },
+            },
+          },
+        },
+      },
+      GeoFormat: {
+        type: "object",
+        required: ["country", "percent"],
+        properties: {
+          country: {
+            type: "string",
+            description: "Country code (e.g., 'US', 'GB', 'DE')",
+            example: "US",
+          },
+          percent: {
+            type: "number",
+            minimum: 0,
+            maximum: 1,
+            description: "Percentage of traffic (0.0 to 1.0, must sum to 1.0)",
+            example: 0.34,
+          },
+        },
+        example: {
+          country: "US",
+          percent: 0.34,
+        },
+      },
+      UserStats: {
+        type: "object",
+        properties: {
+          id: {
+            type: "string",
+            description: "User ID",
+          },
+          email: {
+            type: "string",
+            format: "email",
+            description: "User email",
+          },
+          firstName: {
+            type: "string",
+            description: "First name",
+          },
+          lastName: {
+            type: "string",
+            description: "Last name",
+          },
+          credits: {
+            type: "number",
+            description: "Available credits",
+          },
+          availableHits: {
+            type: "number",
+            description: "Available hits",
+          },
+        },
+      },
+      CreditDebugInfo: {
+        type: "object",
+        properties: {
+          ok: {
+            type: "boolean",
+            example: true,
+          },
+          campaign: {
+            type: "object",
+            properties: {
+              id: {
+                type: "string",
+              },
+              title: {
+                type: "string",
+              },
+              spark_traffic_project_id: {
+                type: "string",
+              },
+              createdAt: {
+                type: "string",
+                format: "date-time",
+              },
+              last_stats_check: {
+                type: "string",
+                format: "date-time",
+              },
+              total_hits_counted: {
+                type: "number",
+              },
+              credit_deduction_enabled: {
+                type: "boolean",
+              },
+            },
+          },
+          user: {
+            $ref: "#/components/schemas/UserStats",
+          },
+          currentStats: {
+            type: "object",
+            properties: {
+              totalCurrentHits: {
+                type: "number",
+              },
+              todayHits: {
+                type: "number",
+              },
+              totalHitsCounted: {
+                type: "number",
+              },
+              potentialNewHits: {
+                type: "number",
+              },
+              dailyBreakdown: {
+                type: "object",
+              },
+              rawSparkTrafficData: {
+                type: "object",
+              },
+              sparkTrafficError: {
+                type: "object",
+              },
+            },
+          },
+          analysis: {
+            type: "object",
+            properties: {
+              status: {
+                type: "string",
+                enum: ["NEW_HITS_AVAILABLE", "NO_NEW_HITS"],
+              },
+              nextChargeAmount: {
+                type: "number",
+              },
+              explanation: {
+                type: "string",
+              },
+            },
           },
         },
       },
@@ -402,9 +708,16 @@ const swaggerDefinition = {
             description: "Geographic targeting type",
           },
           geo: {
-            type: "string",
-            example: "US",
-            description: "Geographic targeting codes",
+            type: "array",
+            items: {
+              $ref: "#/components/schemas/GeoFormat",
+            },
+            description: "Geographic targeting with new country/percent format",
+            example: [
+              { country: "US", percent: 0.34 },
+              { country: "AE", percent: 0.33 },
+              { country: "IN", percent: 0.33 },
+            ],
           },
           shortener: {
             type: "string",

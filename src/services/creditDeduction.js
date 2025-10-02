@@ -263,7 +263,7 @@ async function processCampaignCredits(campaign) {
 
         // Calculate new hits = total hits ever - previously counted hits
         actualNewHits = Math.max(0, totalHitsEver - previousHitsCounted);
-        
+
         // Update the total visits counted to the current cumulative total
         campaign.total_visits_counted = totalVisitsEver;
 

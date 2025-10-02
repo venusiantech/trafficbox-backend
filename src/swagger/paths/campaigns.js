@@ -44,7 +44,11 @@
  *                 desktop_rate: 2
  *                 auto_renew: "true"
  *                 geo_type: "countries"
- *                 geo: "US"
+ *                 geo: [
+                   {"country": "US", "percent": 0.34},
+                   {"country": "AE", "percent": 0.33},
+                   {"country": "IN", "percent": 0.33}
+                 ]
  *                 shortener: ""
  *                 rss_feed: ""
  *                 ga_id: ""
@@ -904,4 +908,443 @@
  *                     to:
  *                       type: string
  *                       format: date
+ */
+
+/**
+ * @swagger
+ * /api/campaigns/{id}/modify:
+ *   post:
+ *     tags:
+ *       - Campaigns
+ *     summary: Modify campaign
+ *     description: Update campaign settings using SparkTraffic modify-website-traffic-project API. Supports new geo format with country/percent objects.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Campaign ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               title:
+ *                 type: string
+ *                 example: "Updated Campaign Title"
+ *               speed:
+ *                 type: number
+ *                 minimum: 0
+ *                 maximum: 200
+ *                 example: 150
+ *               urls:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: url
+ *                 example: ["https://example.com", "https://example2.com"]
+ *               geo:
+ *                 type: array
+ *                 items:
+ *                   $ref: '#/components/schemas/GeoFormat'
+ *                 description: "New geo format with country/percent objects"
+ *                 example: [
+ *                   {"country": "US", "percent": 0.5},
+ *                   {"country": "CA", "percent": 0.3},
+ *                   {"country": "GB", "percent": 0.2}
+ *                 ]
+ *               countries:
+ *                 type: array
+ *                 items:
+ *                   $ref: '#/components/schemas/GeoFormat'
+ *                 description: "Alias for geo field"
+ *               keywords:
+ *                 type: string
+ *                 example: "updated,keywords"
+ *               traffic_type:
+ *                 type: string
+ *                 example: "referral"
+ *               bounce_rate:
+ *                 type: number
+ *                 minimum: 0
+ *                 maximum: 100
+ *                 example: 25
+ *               time_on_page:
+ *                 type: string
+ *                 example: "30sec"
+ *     responses:
+ *       200:
+ *         description: Campaign modified successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 campaign:
+ *                   $ref: '#/components/schemas/CleanCampaign'
+ *                 message:
+ *                   type: string
+ *                   example: "Campaign updated successfully"
+ *       400:
+ *         description: Bad request (invalid geo format, validation error)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: Campaign not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Forbidden
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/campaigns/{id}/credit-debug:
+ *   get:
+ *     tags:
+ *       - Campaigns
+ *     summary: Debug campaign credit state
+ *     description: Debug endpoint to show campaign credit state without processing charges. Shows current hits, processed hits, and potential charges.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Campaign ID
+ *     responses:
+ *       200:
+ *         description: Credit debug information retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/CreditDebugInfo'
+ *       404:
+ *         description: Campaign not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Forbidden (owner or admin only)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/campaigns/{id}/test-credits:
+ *   post:
+ *     tags:
+ *       - Campaigns
+ *     summary: Test credit processing
+ *     description: Test credit processing for a specific campaign. Shows current state and processes any new hits since last check.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Campaign ID
+ *     responses:
+ *       200:
+ *         description: Test credit processing completed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Test credit processing completed"
+ *                 result:
+ *                   type: object
+ *                   description: Credit processing result
+ *                 currentState:
+ *                   type: object
+ *                   properties:
+ *                     totalCurrentHits:
+ *                       type: number
+ *                     totalHitsCounted:
+ *                       type: number
+ *                     potentialNewHits:
+ *                       type: number
+ *                     userCredits:
+ *                       type: number
+ *                 explanation:
+ *                   type: string
+ *                   description: Explanation of what happened
+ *       404:
+ *         description: Campaign not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Forbidden (owner or admin only)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/campaigns/{id}/toggle-credit-deduction:
+ *   post:
+ *     tags:
+ *       - Campaigns
+ *     summary: Toggle credit deduction
+ *     description: Enable or disable automatic credit deduction for a campaign
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Campaign ID
+ *     responses:
+ *       200:
+ *         description: Credit deduction toggled successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Credit deduction enabled"
+ *                 campaign:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     title:
+ *                       type: string
+ *                     credit_deduction_enabled:
+ *                       type: boolean
+ *       404:
+ *         description: Campaign not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       403:
+ *         description: Forbidden (owner or admin only)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/campaigns/{id}/process-credits:
+ *   post:
+ *     tags:
+ *       - Campaigns
+ *     summary: Manual credit processing (Admin only)
+ *     description: Manually process credits for a specific campaign (admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Campaign ID
+ *     responses:
+ *       200:
+ *         description: Credit processing completed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Credit processing completed"
+ *                 result:
+ *                   type: object
+ *       403:
+ *         description: Forbidden (admin only)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       404:
+ *         description: Campaign not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/campaigns/admin/process-all-credits:
+ *   post:
+ *     tags:
+ *       - Campaigns
+ *     summary: Process all campaigns credits (Admin only)
+ *     description: Manually trigger credit processing for all active campaigns (admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Bulk credit processing completed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Bulk credit processing completed"
+ *                 result:
+ *                   type: object
+ *                   description: Processing result with statistics
+ *       403:
+ *         description: Forbidden (admin only)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/campaigns/admin/migrate-geo-format:
+ *   post:
+ *     tags:
+ *       - Campaigns
+ *     summary: Migrate campaigns to new geo format (Admin only)
+ *     description: Migrate existing campaigns from old geo format to new country/percent format (admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               dryRun:
+ *                 type: boolean
+ *                 default: false
+ *                 description: "If true, only shows what would be migrated without making changes"
+ *               batchSize:
+ *                 type: number
+ *                 default: 100
+ *                 description: "Number of campaigns to process at once"
+ *     responses:
+ *       200:
+ *         description: Migration completed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Migration completed successfully"
+ *                 migrated:
+ *                   type: number
+ *                   description: "Number of campaigns migrated"
+ *                 skipped:
+ *                   type: number
+ *                   description: "Number of campaigns skipped"
+ *                 errors:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                   description: "Any errors encountered during migration"
+ *       403:
+ *         description: Forbidden (admin only)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
  */

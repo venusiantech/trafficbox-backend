@@ -7,7 +7,40 @@ const campaignSchema = new mongoose.Schema(
     urls: { type: [String], default: [] },
     duration_min: Number,
     duration_max: Number,
-    countries: { type: [String], default: [] },
+    countries: {
+      type: mongoose.Schema.Types.Mixed, // Allow both old format (strings) and new format (objects)
+      default: [],
+      validate: {
+        validator: function (value) {
+          if (!Array.isArray(value)) return true; // Allow empty or non-array values
+
+          // Check if it's the old format (array of strings) - this is valid for existing campaigns
+          if (value.length > 0 && typeof value[0] === "string") {
+            return true; // Old format is valid
+          }
+
+          // Check if it's the new format (array of objects with country and percent)
+          if (
+            value.length > 0 &&
+            typeof value[0] === "object" &&
+            value[0] !== null
+          ) {
+            return value.every(
+              (item) =>
+                item.country &&
+                typeof item.country === "string" &&
+                typeof item.percent === "number" &&
+                item.percent >= 0 &&
+                item.percent <= 1
+            );
+          }
+
+          return true; // Empty array is valid
+        },
+        message:
+          "Countries must be either an array of country codes (old format) or an array of objects with country and percent fields (new format)",
+      },
+    },
     rule: { type: String, enum: ["all", "any", "except"], default: "any" },
     capping_type: { type: String },
     capping_value: Number,

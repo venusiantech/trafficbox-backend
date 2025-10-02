@@ -730,3 +730,122 @@
  *             schema:
  *               $ref: '#/components/schemas/ErrorResponse'
  */
+
+/**
+ * @swagger
+ * /api/admin/credit-system/stats:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Get credit system statistics
+ *     description: Get comprehensive statistics about the automated credit deduction system
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Credit system statistics retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 stats:
+ *                   type: object
+ *                   properties:
+ *                     totalCampaignsWithDeduction:
+ *                       type: number
+ *                       description: "Number of campaigns with credit deduction enabled"
+ *                     totalHitsProcessed:
+ *                       type: number
+ *                       description: "Total hits processed across all campaigns"
+ *                     totalCreditsDeducted:
+ *                       type: number
+ *                       description: "Total credits deducted from all users"
+ *                     averageHitsPerCampaign:
+ *                       type: number
+ *                       description: "Average hits per campaign"
+ *                     lastProcessingRun:
+ *                       type: string
+ *                       format: date-time
+ *                       description: "Timestamp of last automatic processing"
+ *                     campaignsProcessedLast24h:
+ *                       type: number
+ *                       description: "Number of campaigns processed in last 24 hours"
+ *       403:
+ *         description: Forbidden (admin only)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+
+/**
+ * @swagger
+ * /api/admin/migration/geo-format/status:
+ *   get:
+ *     tags:
+ *       - Admin
+ *     summary: Check geo format migration status
+ *     description: Get status of campaigns that need migration to new geo format
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Migration status retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 ok:
+ *                   type: boolean
+ *                   example: true
+ *                 status:
+ *                   type: object
+ *                   properties:
+ *                     totalCampaigns:
+ *                       type: number
+ *                       description: "Total number of campaigns"
+ *                     usingNewFormat:
+ *                       type: number
+ *                       description: "Campaigns already using new geo format"
+ *                     needsMigration:
+ *                       type: number
+ *                       description: "Campaigns that need migration"
+ *                     migrationProgress:
+ *                       type: number
+ *                       description: "Migration progress percentage"
+ *                     sampleOldFormat:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           campaignId:
+ *                             type: string
+ *                           title:
+ *                             type: string
+ *                           currentGeoFormat:
+ *                             type: array
+ *                       description: "Sample campaigns with old format"
+ *       403:
+ *         description: Forbidden (admin only)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */

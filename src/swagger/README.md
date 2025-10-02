@@ -1,6 +1,47 @@
-# TrafficBox API Documentation
+# TrafficBox Backend API Documentation (v2.0.0)
 
-This directory contains comprehensive Swagger/OpenAPI documentation for all TrafficBox API endpoints.
+This directory contains comprehensive Swagger/OpenAPI documentation for all TrafficBox Backend API endpoints with automated credit deduction and new geo format support.
+
+## Recent Updates (v2.0.0)
+
+### 🆕 Core Enhancements
+
+- **New Geo Format**: Supports country/percent objects for precise traffic distribution
+- **Automated Credit System**: Every 5-second credit deduction with comprehensive debugging
+- **Clean API Responses**: Vendor implementation details hidden from end users
+- **Migration System**: Seamless migration from old to new geo format
+- **Enhanced Documentation**: Complete endpoint coverage with examples
+
+### 🎯 New Geo Format
+
+The API now supports precise traffic allocation with percentage-based geo targeting:
+
+**New Format (Required for new campaigns):**
+
+```json
+{
+  "geo": [
+    { "country": "US", "percent": 0.34 },
+    { "country": "AE", "percent": 0.33 },
+    { "country": "IN", "percent": 0.33 }
+  ]
+}
+```
+
+**Legacy Format (Still supported for existing campaigns):**
+
+```json
+{
+  "countries": ["US", "AE", "IN"]
+}
+```
+
+### 📊 New Schemas Added
+
+- **CleanCampaign**: User-friendly campaign response hiding vendor details
+- **GeoFormat**: New country/percent object structure
+- **UserStats**: Enhanced user statistics with credits and hits
+- **CreditDebugInfo**: Comprehensive debug information for credit system
 
 ## Files Structure
 
@@ -10,17 +51,92 @@ swagger/
 └── paths/
     ├── index.js            # Path loader
     ├── auth.js             # Authentication endpoints
-    ├── campaigns.js        # Campaign management endpoints
-    ├── admin.js            # Admin-only endpoints
+    ├── campaigns.js        # Campaign management endpoints (UPDATED)
+    ├── admin.js            # Admin-only endpoints (UPDATED)
     └── misc.js             # Account, profile, and website endpoints
 ```
+
+## 🆕 New Endpoints Added
+
+### Campaign Management
+
+- **POST** `/api/campaigns/{id}/modify` - Update campaigns with new geo format support
+- **GET** `/api/campaigns/{id}/credit-debug` - Debug credit processing state
+- **POST** `/api/campaigns/{id}/test-credits` - Test credit processing
+- **POST** `/api/campaigns/{id}/toggle-credit-deduction` - Enable/disable auto deduction
+
+### Admin Credit System
+
+- **POST** `/api/campaigns/admin/process-all-credits` - Bulk credit processing
+- **POST** `/api/campaigns/admin/migrate-geo-format` - Migrate to new geo format
+- **GET** `/api/admin/credit-system/stats` - Credit system statistics
+- **GET** `/api/admin/migration/geo-format/status` - Migration status
 
 ## Access Documentation
 
 Once the server is running, access the interactive Swagger UI at:
 
-- **Local Development**: http://localhost:5000/api-docs
+- **Local Development**: http://localhost:5001/api-docs
 - **Production**: https://your-domain.com/api-docs
+
+## 🔧 Migration Guide
+
+### For Existing Campaigns
+
+Use the admin migration endpoint to convert campaigns from old format to new format:
+
+```bash
+# Check migration status
+GET /api/admin/migration/geo-format/status
+
+# Run migration (admin only)
+POST /api/campaigns/admin/migrate-geo-format
+{
+  "dryRun": false,
+  "batchSize": 100
+}
+```
+
+### For New Campaigns
+
+Always use the new geo format when creating campaigns:
+
+```json
+{
+  "url": "https://example.com",
+  "title": "My Campaign",
+  "geo": [
+    { "country": "US", "percent": 0.5 },
+    { "country": "CA", "percent": 0.3 },
+    { "country": "GB", "percent": 0.2 }
+  ]
+}
+```
+
+## 🔄 Automated Credit System
+
+### How It Works
+
+- **Every 5 seconds**: System checks all active campaigns for new hits
+- **SparkTraffic Integration**: Fetches real-time hit statistics
+- **Automatic Deduction**: 1 credit per new hit detected
+- **User Protection**: Stops when user runs out of credits
+
+### Monitoring & Debugging
+
+```bash
+# Debug specific campaign credit state
+GET /api/campaigns/{id}/credit-debug
+
+# Test credit processing for campaign
+POST /api/campaigns/{id}/test-credits
+
+# Toggle auto-deduction for campaign
+POST /api/campaigns/{id}/toggle-credit-deduction
+
+# Admin: Process all campaigns manually
+POST /api/campaigns/admin/process-all-credits
+```
 
 ## API Overview
 
@@ -30,30 +146,30 @@ Once the server is running, access the interactive Swagger UI at:
 - **POST** `/api/auth/register-admin` - Register admin user (testing)
 - **POST** `/api/auth/login` - Login (users and admins)
 
-### Campaign Management (`/api/campaigns`)
+### 🔥 Enhanced Campaign Management (`/api/campaigns`)
 
-- **POST** `/api/campaigns` - Create campaign
-- **GET** `/api/campaigns/:id` - Get campaign details
-- **PUT** `/api/campaigns/:id` - Update campaign
+- **POST** `/api/campaigns` - Create campaign (supports new geo format)
+- **GET** `/api/campaigns/:id` - Get campaign details with stats
+- **POST** `/api/campaigns/:id/modify` - 🆕 Update with new geo format
 - **DELETE** `/api/campaigns/:id` - Archive campaign (soft delete)
 - **POST** `/api/campaigns/:id/pause` - Pause campaign
 - **POST** `/api/campaigns/:id/resume` - Resume campaign
-- **POST** `/api/campaigns/:id/restore` - Restore archived campaign
-- **GET** `/api/campaigns/archived` - Get archived campaigns
+- **GET** `/api/campaigns/:id/stats` - Detailed campaign statistics
+- **GET** `/api/campaigns/:id/credit-debug` - 🆕 Debug credit state
+- **POST** `/api/campaigns/:id/test-credits` - 🆕 Test credit processing
+- **POST** `/api/campaigns/:id/toggle-credit-deduction` - 🆕 Toggle auto-deduction
 - **GET** `/api/campaigns/user/stats` - Get user stats
-- **POST** `/api/campaigns/user/:userId/add-credits` - Add credits (admin)
+- **GET** `/api/campaigns/archived` - Get archived campaigns
 
-### Admin Panel (`/api/admin`)
+### 🔧 Enhanced Admin Panel (`/api/admin`)
 
 - **GET** `/api/admin/dashboard` - Admin dashboard overview
 - **GET** `/api/admin/users` - Get all users (paginated)
 - **GET** `/api/admin/campaigns` - Get all campaigns (paginated)
-- **GET** `/api/admin/users/:userId` - Get user details
-- **PUT** `/api/admin/users/:userId/credits` - Update user credits
-- **POST** `/api/admin/campaigns/:campaignId/:action` - Force pause/resume
-- **DELETE** `/api/admin/campaigns/:campaignId` - Admin delete campaign
-- **GET** `/api/admin/analytics` - System analytics
-- **GET** `/api/admin/search` - Search users and campaigns
+- **POST** `/api/campaigns/admin/process-all-credits` - 🆕 Bulk credit processing
+- **POST** `/api/campaigns/admin/migrate-geo-format` - 🆕 Geo format migration
+- **GET** `/api/admin/credit-system/stats` - 🆕 Credit system statistics
+- **GET** `/api/admin/migration/geo-format/status` - 🆕 Migration status
 
 ### Archive Management (`/api/admin/archives`)
 
@@ -61,30 +177,13 @@ Once the server is running, access the interactive Swagger UI at:
 - **POST** `/api/admin/archives/cleanup` - Manual cleanup job
 - **GET** `/api/admin/archives/campaigns` - All archived campaigns
 
-### Account & Profile (`/api/account`, `/api/me`)
-
-- **GET** `/api/account` - Get account info
-- **PUT** `/api/account` - Update account
-- **GET** `/api/me` - Get current user profile
-
-### Websites (`/api/websites`)
-
-- **GET** `/api/websites` - Get user websites
-- **POST** `/api/websites` - Add new website
-
 ## Authentication
 
-All protected endpoints require a Bearer token in the Authorization header:
+All protected endpoints require a Bearer token:
 
 ```
 Authorization: Bearer <your_jwt_token>
 ```
-
-### Getting a Token
-
-1. **Register**: POST `/api/auth/register` or `/api/auth/register-admin`
-2. **Login**: POST `/api/auth/login`
-3. **Use Token**: Include in Authorization header for all subsequent requests
 
 ### Test Credentials
 
@@ -106,34 +205,40 @@ Authorization: Bearer <your_jwt_token>
 }
 ```
 
+## 🔒 Backward Compatibility
+
+- ✅ Legacy string array geo format still supported for existing campaigns
+- ✅ Migration endpoint available for updating old campaigns
+- ✅ Flexible validation supports both formats during transition
+- ✅ Existing campaigns continue working without changes
+
 ## Key Features
 
-### Soft Delete System
+### 🎯 Precise Traffic Targeting
 
-- Campaigns are archived instead of permanently deleted
-- 7-day grace period for restoration
-- Automated cleanup jobs mark campaigns eligible for permanent deletion
-- Admin oversight of archive system
+- Country-specific percentage allocation
+- Must total 100% (sum of percents = 1.0)
+- Supports up to 11 countries per campaign
 
-### Credit/Hits System
+### 💰 Automated Credit System
 
-- Users get 5000 credits = 1666 available hits by default
-- Hits are deducted when creating campaigns
-- Admin can manage user credits and hits
+- Real-time hit tracking and credit deduction
+- User-friendly credit debugging tools
+- Admin oversight and bulk processing
+- Automatic campaign pausing when credits exhausted
 
-### Vendor Integration
+### 🔄 Clean API Design
 
-- **SparkTraffic**: Project creation and speed control (0=pause, 200=resume)
-- **9Hits**: Campaign management with state control
-- Dual vendor support with unified API interface
+- Vendor details hidden from end users
+- Consistent response formats across endpoints
+- User-friendly status indicators
+- Comprehensive error handling
 
-### Admin Features
+### 🗑️ Soft Delete System
 
-- Complete system oversight
-- User and campaign management
-- Archive system monitoring
-- Analytics and reporting
-- Manual cleanup controls
+- 7-day grace period for campaign restoration
+- Automated cleanup jobs
+- Admin oversight capabilities
 
 ## Response Formats
 
@@ -142,8 +247,14 @@ Authorization: Bearer <your_jwt_token>
 ```json
 {
   "ok": true,
-  "data": { ... },
-  "message": "Operation successful"
+  "campaign": {
+    /* CleanCampaign object */
+  },
+  "message": "Campaign created successfully",
+  "userStats": {
+    "hitsDeducted": 5,
+    "remainingHits": 1661
+  }
 }
 ```
 
@@ -151,46 +262,28 @@ Authorization: Bearer <your_jwt_token>
 
 ```json
 {
-  "error": "Error message description"
+  "error": "geo items must be objects with 'country' and 'percent' fields"
 }
-```
-
-## Testing the Delete Route
-
-The soft-delete system works as follows:
-
-1. **First DELETE**: Archives campaign, sets `is_archived: true`, pauses on vendor
-2. **Grace Period**: 7 days to restore using POST `/restore`
-3. **Cleanup Job**: Marks campaigns `delete_eligible: true` after 7 days
-4. **Second DELETE**: Permanently deletes if `delete_eligible: true`
-
-Test sequence:
-
-```bash
-# Create campaign
-POST /api/campaigns
-
-# Archive campaign (soft delete)
-DELETE /api/campaigns/:id
-
-# Check archived campaigns
-GET /api/campaigns/archived
-
-# Restore if needed
-POST /api/campaigns/:id/restore
-
-# Or wait 7 days and delete again for permanent deletion
 ```
 
 ## Environment Requirements
 
-Ensure these environment variables are set:
+```bash
+JWT_SECRET=your_jwt_secret
+MONGO_URI=mongodb://localhost:27017/trafficbox
+SPARKTRAFFIC_API_KEY=your_sparktraffic_key
+NODE_ENV=development
+PORT=5001
+```
 
-- `JWT_SECRET` - JWT signing secret
-- `MONGO_URI` - MongoDB connection string
-- `SPARKTRAFFIC_API_KEY` - SparkTraffic API key
-- `NINEHITS_API_KEY` - 9Hits API key
+## 🚀 Getting Started
+
+1. **Start Server**: The API documentation will be available at `/api-docs`
+2. **Register/Login**: Get your JWT token
+3. **Create Campaign**: Use new geo format for optimal targeting
+4. **Monitor Credits**: Use debug endpoints to track credit usage
+5. **Manage Campaigns**: Pause, resume, modify as needed
 
 ## Support
 
-For API support or questions, refer to the interactive Swagger UI documentation at `/api-docs` when the server is running.
+For API support or questions, refer to the interactive Swagger UI documentation at `/api-docs` when the server is running, or check the comprehensive endpoint documentation in the `paths/` directory.
