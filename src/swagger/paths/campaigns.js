@@ -45,10 +45,10 @@
  *                 auto_renew: "true"
  *                 geo_type: "countries"
  *                 geo: [
-                   {"country": "US", "percent": 0.34},
-                   {"country": "AE", "percent": 0.33},
-                   {"country": "IN", "percent": 0.33}
-                 ]
+ *                   {"country": "US", "percent": 0.34},
+ *                   {"country": "AE", "percent": 0.33},
+ *                   {"country": "IN", "percent": 0.33}
+ *                 ]
  *                 shortener: ""
  *                 rss_feed: ""
  *                 ga_id: ""
@@ -205,72 +205,6 @@
  *               $ref: '#/components/schemas/ErrorResponse'
  *       401:
  *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *   put:
- *     tags:
- *       - Campaigns
- *     summary: Update campaign
- *     description: Update campaign details
- *     security:
- *       - BearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *         description: Campaign ID
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               title:
- *                 type: string
- *               max_hits:
- *                 type: number
- *               macros:
- *                 type: string
- *               popup_macros:
- *                 type: string
- *               is_adult:
- *                 type: boolean
- *               is_coin_mining:
- *                 type: boolean
- *     responses:
- *       200:
- *         description: Campaign updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 ok:
- *                   type: boolean
- *                   example: true
- *                 campaign:
- *                   $ref: '#/components/schemas/Campaign'
- *                 vendorResp:
- *                   type: object
- *       404:
- *         description: Campaign not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       403:
- *         description: Forbidden
  *         content:
  *           application/json:
  *             schema:
@@ -917,7 +851,7 @@
  *     tags:
  *       - Campaigns
  *     summary: Modify campaign
- *     description: Update campaign settings using SparkTraffic modify-website-traffic-project API. Supports new geo format with country/percent objects.
+ *     description: Update campaign settings using SparkTraffic modify-website-traffic-project API. Uses the same request body format as campaign creation. Supports new geo format with country/percent objects.
  *     security:
  *       - BearerAuth: []
  *     parameters:
@@ -932,51 +866,47 @@
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             properties:
- *               title:
- *                 type: string
- *                 example: "Updated Campaign Title"
- *               speed:
- *                 type: number
- *                 minimum: 0
- *                 maximum: 200
- *                 example: 150
- *               urls:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: url
- *                 example: ["https://example.com", "https://example2.com"]
- *               geo:
- *                 type: array
- *                 items:
- *                   $ref: '#/components/schemas/GeoFormat'
- *                 description: "New geo format with country/percent objects"
- *                 example: [
+ *             $ref: '#/components/schemas/CreateCampaignRequest'
+ *           examples:
+ *             sparkTraffic_modify:
+ *               summary: Modify SparkTraffic campaign with full configuration
+ *               value:
+ *                 url: "trafficboxes.com"
+ *                 title: "Updated Campaign Title"
+ *                 urls: ["https://trafficboxes.com", "https://example.com"]
+ *                 keywords: "updated,keywords,traffic"
+ *                 referrers:
+ *                   mode: "basic"
+ *                   urls: ["https://ref.com", "https://newref.com"]
+ *                 languages: "en"
+ *                 bounce_rate: 25
+ *                 return_rate: 10
+ *                 click_outbound_events: 5
+ *                 form_submit_events: 2
+ *                 scroll_events: 3
+ *                 time_on_page: "30sec"
+ *                 desktop_rate: 3
+ *                 auto_renew: "true"
+ *                 geo_type: "countries"
+ *                 geo: [
  *                   {"country": "US", "percent": 0.5},
  *                   {"country": "CA", "percent": 0.3},
  *                   {"country": "GB", "percent": 0.2}
  *                 ]
- *               countries:
- *                 type: array
- *                 items:
- *                   $ref: '#/components/schemas/GeoFormat'
- *                 description: "Alias for geo field"
- *               keywords:
- *                 type: string
- *                 example: "updated,keywords"
- *               traffic_type:
- *                 type: string
- *                 example: "referral"
- *               bounce_rate:
- *                 type: number
- *                 minimum: 0
- *                 maximum: 100
- *                 example: 25
- *               time_on_page:
- *                 type: string
- *                 example: "30sec"
+ *                 shortener: ""
+ *                 rss_feed: ""
+ *                 ga_id: ""
+ *                 size: "standard"
+ *                 speed: 150
+ *             sparkTraffic_basic_modify:
+ *               summary: Basic campaign modification
+ *               value:
+ *                 title: "Updated Title"
+ *                 speed: 100
+ *                 geo: [
+ *                   {"country": "US", "percent": 0.7},
+ *                   {"country": "UK", "percent": 0.3}
+ *                 ]
  *     responses:
  *       200:
  *         description: Campaign modified successfully
