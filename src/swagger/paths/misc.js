@@ -1,112 +1,11 @@
 /**
  * @swagger
- * /api/account:
- *   get:
- *     tags:
- *       - Account
- *     summary: Get account information
- *     description: Get current user's account information
- *     security:
- *       - BearerAuth: []
- *     responses:
- *       200:
- *         description: Account information retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 ok:
- *                   type: boolean
- *                   example: true
- *                 user:
- *                   $ref: '#/components/schemas/User'
- *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       404:
- *         description: User not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *   put:
- *     tags:
- *       - Account
- *     summary: Update account information
- *     description: Update current user's account information
- *     security:
- *       - BearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             properties:
- *               firstName:
- *                 type: string
- *                 example: "John"
- *               lastName:
- *                 type: string
- *                 example: "Doe"
- *               dob:
- *                 type: string
- *                 format: date
- *                 example: "1990-01-01"
- *     responses:
- *       200:
- *         description: Account updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 ok:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Account updated successfully"
- *                 user:
- *                   $ref: '#/components/schemas/User'
- *       401:
- *         description: Unauthorized
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       404:
- *         description: User not found
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       500:
- *         description: Server error
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- */
-
-/**
- * @swagger
  * /api/me:
  *   get:
  *     tags:
  *       - Account
  *     summary: Get current user profile
- *     description: Get current authenticated user's profile information
+ *     description: Get current authenticated user's profile information including credits and available hits. Password field is excluded for security.
  *     security:
  *       - BearerAuth: []
  *     responses:
@@ -117,11 +16,70 @@
  *             schema:
  *               type: object
  *               properties:
- *                 ok:
- *                   type: boolean
- *                   example: true
- *                 user:
- *                   $ref: '#/components/schemas/User'
+ *                 id:
+ *                   type: string
+ *                   description: User ID
+ *                   example: "68ce78a2d1017aa5b1da3e6a"
+ *                 email:
+ *                   type: string
+ *                   format: email
+ *                   description: User email address
+ *                   example: "azamtest3@gmail.com"
+ *                 firstName:
+ *                   type: string
+ *                   description: User first name
+ *                   example: "Azam"
+ *                 lastName:
+ *                   type: string
+ *                   description: User last name
+ *                   example: "Mohd"
+ *                 dob:
+ *                   type: string
+ *                   format: date-time
+ *                   description: Date of birth
+ *                   example: "1990-01-01T00:00:00.000Z"
+ *                 role:
+ *                   type: string
+ *                   enum: ["user", "admin"]
+ *                   description: User role
+ *                   example: "user"
+ *                 cashBalance:
+ *                   type: number
+ *                   description: User cash balance
+ *                   example: 0
+ *                 credits:
+ *                   type: number
+ *                   description: User credits available for campaigns
+ *                   example: 4787
+ *                 availableHits:
+ *                   type: number
+ *                   description: Available hits (credits/3) for campaign creation
+ *                   example: 1527
+ *                 createdAt:
+ *                   type: string
+ *                   format: date-time
+ *                   description: User account creation timestamp
+ *                   example: "2025-09-20T09:49:22.697Z"
+ *                 updatedAt:
+ *                   type: string
+ *                   format: date-time
+ *                   description: User account last update timestamp
+ *                   example: "2025-10-04T09:39:47.098Z"
+ *             examples:
+ *               user_profile:
+ *                 summary: Secure user profile response (no password)
+ *                 value:
+ *                   id: "68ce78a2d1017aa5b1da3e6a"
+ *                   email: "azamtest3@gmail.com"
+ *                   firstName: "Azam"
+ *                   lastName: "Mohd"
+ *                   dob: "1990-01-01T00:00:00.000Z"
+ *                   role: "user"
+ *                   cashBalance: 0
+ *                   credits: 4787
+ *                   availableHits: 1527
+ *                   createdAt: "2025-09-20T09:49:22.697Z"
+ *                   updatedAt: "2025-10-04T09:39:47.098Z"
  *       401:
  *         description: Unauthorized
  *         content:
