@@ -7,6 +7,7 @@ const {
   processSingleCampaignCredits,
   processAllCampaignCredits,
 } = require("../services/creditDeduction");
+const { generateCampaignReportPDF } = require("../services/reportService");
 const logger = require("../utils/logger");
 
 const router = express.Router();
@@ -2296,6 +2297,90 @@ router.post("/admin/migrate-geo-format", auth("admin"), async (req, res) => {
       stack: err.stack,
     });
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Generate PDF report for campaign
+router.get("/:id/report.pdf", auth(), async (req, res) => {
+  try {
+    const campaign = await Campaign.findById(req.params.id);
+    if (!campaign) {
+      logger.warn("Campaign not found for report", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+
+    if (campaign.user.toString() !== req.user.id && req.user.role !== "admin") {
+      logger.warn("Unauthorized report access attempt", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+        campaignOwner: campaign.user.toString(),
+        userRole: req.user.role,
+      });
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Don't allow access to archived campaigns unless specifically requested
+    if (campaign.is_archived && !req.query.include_archived) {
+      logger.warn("Archived campaign report access without flag", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+      });
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+
+    // Get date range from query parameters (optional)
+    const { from, to } = req.query;
+
+    // Validate date format if provided
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (from && !dateRegex.test(from)) {
+      return res.status(400).json({
+        error: "Invalid 'from' date format. Use YYYY-MM-DD (e.g., 2024-01-01)",
+      });
+    }
+    if (to && !dateRegex.test(to)) {
+      return res.status(400).json({
+        error: "Invalid 'to' date format. Use YYYY-MM-DD (e.g., 2024-01-31)",
+      });
+    }
+
+    logger.info("Generating campaign PDF report", {
+      userId: req.user.id,
+      campaignId: req.params.id,
+      dateRange: { from, to },
+    });
+
+    // Generate PDF report
+    const pdfBuffer = await generateCampaignReportPDF(req.params.id, { from, to });
+
+    // Set response headers for PDF download
+    const filename = `campaign-${campaign.title || campaign._id}-report.pdf`;
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+
+    logger.info("Campaign PDF report generated successfully", {
+      userId: req.user.id,
+      campaignId: req.params.id,
+      filename,
+      size: pdfBuffer.length,
+    });
+
+    res.send(pdfBuffer);
+  } catch (err) {
+    logger.error("Generate campaign report failed", {
+      userId: req.user.id,
+      campaignId: req.params.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ 
+      error: "Failed to generate campaign report", 
+      details: err.message 
+    });
   }
 });
 

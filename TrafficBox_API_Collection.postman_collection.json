@@ -1,0 +1,1081 @@
+{
+  "info": {
+    "name": "TrafficBox API Collection",
+    "description": "Complete API collection for TrafficBox Backend with all endpoints and payloads",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{auth_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "auth_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "admin_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "campaign_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "🔐 Authentication",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"testuser@example.com\",\n  \"password\": \"password123\",\n  \"firstName\": \"Test\",\n  \"lastName\": \"User\",\n  \"dob\": \"1990-01-01\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "register"]
+            }
+          }
+        },
+        {
+          "name": "Register Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"testadmin@example.com\",\n  \"password\": \"admin123\",\n  \"firstName\": \"Admin\",\n  \"lastName\": \"User\",\n  \"dob\": \"1985-01-01\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/register-admin",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "register-admin"]
+            }
+          }
+        },
+        {
+          "name": "Login User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const responseJson = pm.response.json();",
+                  "    pm.collectionVariables.set('auth_token', responseJson.token);",
+                  "    console.log('Auth token saved:', responseJson.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"azamtest3@gmail.com\",\n  \"password\": \"test1234\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            }
+          }
+        },
+        {
+          "name": "Login Admin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const responseJson = pm.response.json();",
+                  "    pm.collectionVariables.set('admin_token', responseJson.token);",
+                  "    console.log('Admin token saved:', responseJson.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@test.com\",\n  \"password\": \"admin123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🎯 Campaign Management",
+      "item": [
+        {
+          "name": "Create Campaign",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const responseJson = pm.response.json();",
+                  "    if (responseJson.campaign && responseJson.campaign.id) {",
+                  "        pm.collectionVariables.set('campaign_id', responseJson.campaign.id);",
+                  "        console.log('Campaign ID saved:', responseJson.campaign.id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"trafficbox.com\",\n  \"title\": \"test-campaign\",\n  \"urls\": [\"https://trafficboxes.com\"],\n  \"keywords\": \"test,traffic\",\n  \"referrers\": {\n    \"mode\": \"basic\",\n    \"urls\": [\"https://ref.com\"]\n  },\n  \"languages\": \"en\",\n  \"bounce_rate\": 0,\n  \"return_rate\": 0,\n  \"click_outbound_events\": 0,\n  \"form_submit_events\": 0,\n  \"scroll_events\": 0,\n  \"time_on_page\": \"2sec\",\n  \"desktop_rate\": 2,\n  \"auto_renew\": \"true\",\n  \"geo_type\": \"countries\",\n  \"geo\": [\n    {\"country\": \"FR\", \"percent\": 0.4},\n    {\"country\": \"DE\", \"percent\": 0.6}\n  ],\n  \"shortener\": \"\",\n  \"rss_feed\": \"\",\n  \"ga_id\": \"\",\n  \"size\": \"eco\",\n  \"speed\": 200\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns"]
+            }
+          }
+        },
+        {
+          "name": "Get All Campaigns",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/campaigns?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Campaign by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Modify Campaign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Updated Campaign Title\",\n  \"speed\": 150,\n  \"countries\": [\n    {\"country\": \"US\", \"percent\": 0.6},\n    {\"country\": \"CA\", \"percent\": 0.4}\n  ],\n  \"traffic_type\": \"direct\",\n  \"keywords\": \"updated,keywords\",\n  \"time_on_page\": \"5sec\",\n  \"desktop_rate\": 3,\n  \"bounce_rate\": 10\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/modify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "modify"]
+            }
+          }
+        },
+        {
+          "name": "Pause Campaign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/pause",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "pause"]
+            }
+          }
+        },
+        {
+          "name": "Resume Campaign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/resume",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "resume"]
+            }
+          }
+        },
+        {
+          "name": "Archive Campaign",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Restore Campaign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/restore",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "restore"]
+            }
+          }
+        },
+        {
+          "name": "Get Campaign Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/stats?from=2024-01-01&to=2024-01-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "stats"],
+              "query": [
+                { "key": "from", "value": "2024-01-01" },
+                { "key": "to", "value": "2024-01-31" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate PDF Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/report.pdf?from=2024-01-01&to=2024-01-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "report.pdf"],
+              "query": [
+                { "key": "from", "value": "2024-01-01" },
+                { "key": "to", "value": "2024-01-31" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get User Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/user/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "user", "stats"]
+            }
+          }
+        },
+        {
+          "name": "Get Archived Campaigns",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/archived",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "archived"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "⚡ Alpha - SparkTraffic Only",
+      "item": [
+        {
+          "name": "Create Alpha Campaign",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const responseJson = pm.response.json();",
+                  "    if (responseJson.campaign && responseJson.campaign.id) {",
+                  "        pm.collectionVariables.set('campaign_id', responseJson.campaign.id);",
+                  "        console.log('Alpha Campaign ID saved:', responseJson.campaign.id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"trafficboxes.com\",\n  \"title\": \"trafficboxes\",\n  \"urls\": [\n    \"https://trafficboxes.com\"\n  ],\n  \"keywords\": \"test,traffic\",\n  \"referrers\": {\n    \"mode\": \"basic\",\n    \"urls\": [\n      \"https://ref.com\"\n    ]\n  },\n  \"languages\": \"en\",\n  \"bounce_rate\": 0,\n  \"return_rate\": 0,\n  \"click_outbound_events\": 0,\n  \"form_submit_events\": 0,\n  \"scroll_events\": 0,\n  \"time_on_page\": \"2sec\",\n  \"desktop_rate\": 2,\n  \"auto_renew\": \"true\",\n  \"geo_type\": \"countries\",\n  \"geo\": [\n    {\n      \"country\": \"US\",\n      \"percent\": 0.34\n    },\n    {\n      \"country\": \"AE\",\n      \"percent\": 0.33\n    },\n    {\n      \"country\": \"IN\",\n      \"percent\": 0.33\n    }\n  ],\n  \"shortener\": \"\",\n  \"rss_feed\": \"\",\n  \"ga_id\": \"\",\n  \"size\": \"eco\",\n  \"speed\": 200\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha/campaigns",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha", "campaigns"]
+            }
+          }
+        },
+        {
+          "name": "Get All Alpha Campaigns",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha/campaigns?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha", "campaigns"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Alpha Campaign by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha/campaigns/{{campaign_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha", "campaigns", "{{campaign_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Modify Alpha Campaign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"trafficboxes.com\",\n  \"title\": \"Updated Campaign Title\",\n  \"urls\": [\n    \"https://trafficboxes.com\",\n    \"https://example.com\"\n  ],\n  \"keywords\": \"updated,keywords,traffic\",\n  \"referrers\": {\n    \"mode\": \"basic\",\n    \"urls\": [\n      \"https://ref.com\",\n      \"https://newref.com\"\n    ]\n  },\n  \"languages\": \"en\",\n  \"bounce_rate\": 25,\n  \"return_rate\": 10,\n  \"click_outbound_events\": 5,\n  \"form_submit_events\": 2,\n  \"scroll_events\": 3,\n  \"time_on_page\": \"30sec\",\n  \"desktop_rate\": 3,\n  \"auto_renew\": \"true\",\n  \"geo_type\": \"countries\",\n  \"geo\": [\n    {\n      \"country\": \"US\",\n      \"percent\": 0.5\n    },\n    {\n      \"country\": \"CA\",\n      \"percent\": 0.3\n    },\n    {\n      \"country\": \"GB\",\n      \"percent\": 0.2\n    }\n  ],\n  \"shortener\": \"\",\n  \"rss_feed\": \"\",\n  \"ga_id\": \"\",\n  \"size\": \"standard\",\n  \"speed\": 150\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha/campaigns/{{campaign_id}}/modify",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha", "campaigns", "{{campaign_id}}", "modify"]
+            }
+          }
+        },
+        {
+          "name": "Pause Alpha Campaign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha/campaigns/{{campaign_id}}/pause",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha", "campaigns", "{{campaign_id}}", "pause"]
+            }
+          }
+        },
+        {
+          "name": "Resume Alpha Campaign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha/campaigns/{{campaign_id}}/resume",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha", "campaigns", "{{campaign_id}}", "resume"]
+            }
+          }
+        },
+        {
+          "name": "Archive Alpha Campaign",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/alpha/campaigns/{{campaign_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha", "campaigns", "{{campaign_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Get Alpha Campaign Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha/campaigns/{{campaign_id}}/stats?from=2024-01-01&to=2024-01-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha", "campaigns", "{{campaign_id}}", "stats"],
+              "query": [
+                { "key": "from", "value": "2024-01-01" },
+                { "key": "to", "value": "2024-01-31" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Generate Alpha PDF Report",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha/campaigns/{{campaign_id}}/report.pdf?from=2024-01-01&to=2024-01-31",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha", "campaigns", "{{campaign_id}}", "report.pdf"],
+              "query": [
+                { "key": "from", "value": "2024-01-01" },
+                { "key": "to", "value": "2024-01-31" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔧 Credit Management",
+      "item": [
+        {
+          "name": "Debug Campaign Credits",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/credit-debug",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "credit-debug"]
+            }
+          }
+        },
+        {
+          "name": "Test Credit Processing",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dryRun\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/test-credits",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "test-credits"]
+            }
+          }
+        },
+        {
+          "name": "Toggle Credit Deduction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/toggle-credit-deduction",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "campaigns",
+                "{{campaign_id}}",
+                "toggle-credit-deduction"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reset Hit Counter",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/reset-hit-counter",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "campaigns",
+                "{{campaign_id}}",
+                "reset-hit-counter"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reset All Counters",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/reset-counters",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "reset-counters"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "👤 User Profile",
+      "item": [
+        {
+          "name": "Get User Profile",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "me"]
+            }
+          }
+        },
+        {
+          "name": "Logout User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/me/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "me", "logout"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🌐 Website Management",
+      "item": [
+        {
+          "name": "Add Website",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://mywebsite.com\",\n  \"title\": \"My Website\",\n  \"description\": \"Description of my website\",\n  \"metadata\": {\n    \"category\": \"business\",\n    \"verified\": false\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/websites",
+              "host": ["{{base_url}}"],
+              "path": ["api", "websites"]
+            }
+          }
+        },
+        {
+          "name": "Get All Websites",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/websites",
+              "host": ["{{base_url}}"],
+              "path": ["api", "websites"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📊 Account Info",
+      "item": [
+        {
+          "name": "Get 9Hits Profile",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/account",
+              "host": ["{{base_url}}"],
+              "path": ["api", "account"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔒 Admin - Campaign Management",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{admin_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Add Credits to User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credits\": 1000,\n  \"reason\": \"Bonus credits for testing\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/user/{{user_id}}/add-credits",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "user", "{{user_id}}", "add-credits"]
+            }
+          }
+        },
+        {
+          "name": "Process Campaign Credits",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/{{campaign_id}}/process-credits",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "process-credits"]
+            }
+          }
+        },
+        {
+          "name": "Process All Campaign Credits",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/admin/process-all-credits",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "admin", "process-all-credits"]
+            }
+          }
+        },
+        {
+          "name": "Migrate Geo Format",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/campaigns/admin/migrate-geo-format",
+              "host": ["{{base_url}}"],
+              "path": ["api", "campaigns", "admin", "migrate-geo-format"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔧 Admin Dashboard",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{admin_token}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Admin Dashboard",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/dashboard",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "dashboard"]
+            }
+          }
+        },
+        {
+          "name": "Get All Users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const responseJson = pm.response.json();",
+                  "    if (responseJson.users && responseJson.users.length > 0) {",
+                  "        pm.collectionVariables.set('user_id', responseJson.users[0]._id);",
+                  "        console.log('User ID saved:', responseJson.users[0]._id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/users?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get All Campaigns (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/campaigns?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "campaigns"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get User Details",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/{{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "{{user_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Update User Credits",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"credits\": 5000,\n  \"availableHits\": 1666,\n  \"reason\": \"Admin adjustment\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/{{user_id}}/credits",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "{{user_id}}", "credits"]
+            }
+          }
+        },
+        {
+          "name": "Force Pause Campaign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Admin intervention\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/campaigns/{{campaign_id}}/pause",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "campaigns", "{{campaign_id}}", "pause"]
+            }
+          }
+        },
+        {
+          "name": "Force Resume Campaign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Issue resolved\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/campaigns/{{campaign_id}}/resume",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "campaigns", "{{campaign_id}}", "resume"]
+            }
+          }
+        },
+        {
+          "name": "Delete Campaign (Admin)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/admin/campaigns/{{campaign_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "campaigns", "{{campaign_id}}"]
+            }
+          }
+        },
+        {
+          "name": "System Analytics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/analytics?period=30d",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "analytics"],
+              "query": [{ "key": "period", "value": "30d" }]
+            }
+          }
+        },
+        {
+          "name": "Search Users and Campaigns",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/search?q=test&type=users&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "search"],
+              "query": [
+                { "key": "q", "value": "test" },
+                { "key": "type", "value": "users" },
+                { "key": "limit", "value": "10" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Archive Statistics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/archives/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "archives", "stats"]
+            }
+          }
+        },
+        {
+          "name": "Run Cleanup Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admin/archives/cleanup",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "archives", "cleanup"]
+            }
+          }
+        },
+        {
+          "name": "Get Archived Campaigns (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/archives/campaigns?page=1&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "archives", "campaigns"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

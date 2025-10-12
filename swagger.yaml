@@ -547,6 +547,30 @@ paths:
   /api/campaigns/{id}/stats:
     get:
       summary: Get campaign statistics
+  /api/campaigns/{id}/report.pdf:
+    get:
+      summary: Generate campaign PDF report
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Start date (YYYY-MM-DD)
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+          description: End date (YYYY-MM-DD)
+      responses:
+        "200":
+          description: PDF report file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
       description: Get detailed daily hits and visits statistics for a campaign
       security:
         - bearerAuth: []
@@ -775,6 +799,395 @@ paths:
           description: Admin access required
         "500":
           description: Server error
+  
+  # Alpha Routes - SparkTraffic Only
+  /api/alpha/campaigns:
+    post:
+      summary: Create Alpha campaign (SparkTraffic only)
+      description: Create a new campaign using SparkTraffic vendor exclusively
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  example: "trafficboxes.com"
+                title:
+                  type: string
+                  example: "trafficboxes"
+                urls:
+                  type: array
+                  items:
+                    type: string
+                  example: ["https://trafficboxes.com"]
+                keywords:
+                  type: string
+                  example: "test,traffic"
+                referrers:
+                  type: object
+                  properties:
+                    mode:
+                      type: string
+                      example: "basic"
+                    urls:
+                      type: array
+                      items:
+                        type: string
+                      example: ["https://ref.com"]
+                languages:
+                  type: string
+                  example: "en"
+                bounce_rate:
+                  type: integer
+                  example: 0
+                return_rate:
+                  type: integer
+                  example: 0
+                click_outbound_events:
+                  type: integer
+                  example: 0
+                form_submit_events:
+                  type: integer
+                  example: 0
+                scroll_events:
+                  type: integer
+                  example: 0
+                time_on_page:
+                  type: string
+                  example: "2sec"
+                desktop_rate:
+                  type: integer
+                  example: 2
+                auto_renew:
+                  type: string
+                  example: "true"
+                geo_type:
+                  type: string
+                  example: "countries"
+                geo:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      country:
+                        type: string
+                      percent:
+                        type: number
+                        format: float
+                  example:
+                    - country: "US"
+                      percent: 0.34
+                    - country: "AE"
+                      percent: 0.33
+                    - country: "IN"
+                      percent: 0.33
+                shortener:
+                  type: string
+                  example: ""
+                rss_feed:
+                  type: string
+                  example: ""
+                ga_id:
+                  type: string
+                  example: ""
+                size:
+                  type: string
+                  example: "eco"
+                speed:
+                  type: integer
+                  example: 200
+              required:
+                - url
+      responses:
+        "200":
+          description: Alpha campaign created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  campaign:
+                    $ref: "#/components/schemas/Campaign"
+                  message:
+                    type: string
+                  vendor:
+                    type: string
+                    example: "sparkTraffic"
+    get:
+      summary: Get all Alpha campaigns
+      description: Get all SparkTraffic campaigns for the authenticated user
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: page
+          schema:
+            type: integer
+            default: 1
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 10
+        - in: query
+          name: status
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Alpha campaigns retrieved successfully
+
+  /api/alpha/campaigns/{id}:
+    get:
+      summary: Get Alpha campaign by ID
+      description: Get a specific SparkTraffic campaign with detailed stats
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      responses:
+        "200":
+          description: Alpha campaign retrieved successfully
+        "404":
+          description: Alpha campaign not found
+
+  /api/alpha/campaigns/{id}/modify:
+    post:
+      summary: Modify Alpha campaign
+      description: Update SparkTraffic campaign settings
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  example: "trafficboxes.com"
+                title:
+                  type: string
+                  example: "Updated Campaign Title"
+                urls:
+                  type: array
+                  items:
+                    type: string
+                  example: ["https://trafficboxes.com", "https://example.com"]
+                keywords:
+                  type: string
+                  example: "updated,keywords,traffic"
+                referrers:
+                  type: object
+                  properties:
+                    mode:
+                      type: string
+                      example: "basic"
+                    urls:
+                      type: array
+                      items:
+                        type: string
+                      example: ["https://ref.com", "https://newref.com"]
+                languages:
+                  type: string
+                  example: "en"
+                bounce_rate:
+                  type: integer
+                  example: 25
+                return_rate:
+                  type: integer
+                  example: 10
+                click_outbound_events:
+                  type: integer
+                  example: 5
+                form_submit_events:
+                  type: integer
+                  example: 2
+                scroll_events:
+                  type: integer
+                  example: 3
+                time_on_page:
+                  type: string
+                  example: "30sec"
+                desktop_rate:
+                  type: integer
+                  example: 3
+                auto_renew:
+                  type: string
+                  example: "true"
+                geo_type:
+                  type: string
+                  example: "countries"
+                geo:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      country:
+                        type: string
+                      percent:
+                        type: number
+                        format: float
+                  example:
+                    - country: "US"
+                      percent: 0.5
+                    - country: "CA"
+                      percent: 0.3
+                    - country: "GB"
+                      percent: 0.2
+                shortener:
+                  type: string
+                  example: ""
+                rss_feed:
+                  type: string
+                  example: ""
+                ga_id:
+                  type: string
+                  example: ""
+                size:
+                  type: string
+                  example: "standard"
+                speed:
+                  type: integer
+                  example: 150
+      responses:
+        "200":
+          description: Alpha campaign updated successfully
+
+  /api/alpha/campaigns/{id}/pause:
+    post:
+      summary: Pause Alpha campaign
+      description: Pause a SparkTraffic campaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      responses:
+        "200":
+          description: Alpha campaign paused successfully
+
+  /api/alpha/campaigns/{id}/resume:
+    post:
+      summary: Resume Alpha campaign
+      description: Resume a paused SparkTraffic campaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      responses:
+        "200":
+          description: Alpha campaign resumed successfully
+
+  /api/alpha/campaigns/{id}:
+    delete:
+      summary: Archive Alpha campaign
+      description: Archive a SparkTraffic campaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+      responses:
+        "200":
+          description: Alpha campaign archived successfully
+
+  /api/alpha/campaigns/{id}/stats:
+    get:
+      summary: Get Alpha campaign statistics
+      description: Get detailed statistics for a SparkTraffic campaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date
+          description: Start date (YYYY-MM-DD)
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date
+          description: End date (YYYY-MM-DD)
+      responses:
+        "200":
+          description: Alpha campaign statistics retrieved successfully
+
+  /api/alpha/campaigns/{id}/report.pdf:
+    get:
+      summary: Generate Alpha campaign PDF report
+      description: Generate a PDF report for a SparkTraffic campaign
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: Campaign ID
+        - in: query
+          name: from
+          schema:
+            type: string
+            format: date
+          description: Start date (YYYY-MM-DD)
+        - in: query
+          name: to
+          schema:
+            type: string
+            format: date
+          description: End date (YYYY-MM-DD)
+      responses:
+        "200":
+          description: Alpha PDF report generated successfully
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+
   /api/me:
     get:
       summary: Get user profile

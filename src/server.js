@@ -29,6 +29,7 @@ app.get("/", (req, res) => {
     endpoints: {
       auth: "/api/auth",
       campaigns: "/api/campaigns",
+      alpha: "/api/alpha", // SparkTraffic Alpha routes
       account: "/api/account",
       me: "/api/me",
       websites: "/api/websites",
@@ -56,6 +57,7 @@ app.use(
 // API Routes
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/campaigns", require("./routes/campaigns"));
+app.use("/api/alpha", require("./routes/alpha")); // SparkTraffic Alpha routes
 app.use("/api/account", require("./routes/account"));
 app.use("/api/me", require("./routes/me"));
 app.use("/api/websites", require("./routes/websites"));
