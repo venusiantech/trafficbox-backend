@@ -68,10 +68,25 @@ function createCleanCampaignResponse(
   includeStats = false,
   vendorStats = null
 ) {
+  // Extract URLs from metadata if available, otherwise convert array format to SparkTraffic format
+  let urlsDisplay = {};
+  
+  // Check if we have SparkTraffic URL format in metadata
+  if (campaign.metadata && campaign.metadata.sparkTrafficUrls) {
+    urlsDisplay = campaign.metadata.sparkTrafficUrls;
+  } else if (campaign.urls && Array.isArray(campaign.urls)) {
+    // Convert array format to SparkTraffic format for display
+    campaign.urls.forEach((url, index) => {
+      if (url && url.trim()) {
+        urlsDisplay[`urls-${index + 1}`] = url.trim();
+      }
+    });
+  }
+
   return {
     id: campaign._id,
     title: campaign.title,
-    urls: campaign.urls,
+    urls: urlsDisplay, // Now shows urls-1, urls-2, etc.
     duration_min: campaign.duration_min,
     duration_max: campaign.duration_max,
     countries: campaign.countries,
@@ -194,17 +209,16 @@ router.post("/campaigns", auth(), async (req, res) => {
 
     // SparkTraffic integration (always use SparkTraffic for Alpha)
     const vendor = vendors.sparkTraffic;
-    
-    // Always use demo size (economy not supported)
+
+    // Build SparkTraffic payload following exact API documentation
     const sparkPayload = {
       unique_id: merged.unique_id || undefined,
       created_at: merged.created_at || Date.now(),
       expires_at: merged.expires_at || 0,
       title: merged.title,
-      size: "eco",
+      size: "eco", // Use provided size or default to demo
       multiplier: merged.multiplier || 0,
       speed: merged.speed || 200,
-      "urls-1": merged.urls && merged.urls[0] ? merged.urls[0] : merged.url,
       traffic_type: merged.traffic_type || "direct",
       keywords: merged.keywords || "",
       referrers:
@@ -227,6 +241,41 @@ router.post("/campaigns", auth(), async (req, res) => {
       rss_feed: merged.rss_feed || "",
       ga_id: merged.ga_id || "",
     };
+
+    // Handle URLs in SparkTraffic format (urls-1, urls-2, etc.)
+    // Take single URL and populate urls-1, urls-2, urls-3 with the same URL
+    const sparkTrafficUrls = {};
+    
+    if (merged.url) {
+      // Use the same URL for urls-1, urls-2, and urls-3
+      sparkPayload["urls-1"] = merged.url;
+      sparkPayload["urls-2"] = merged.url;
+      sparkPayload["urls-3"] = merged.url;
+      
+      sparkTrafficUrls["urls-1"] = merged.url;
+      sparkTrafficUrls["urls-2"] = merged.url;
+      sparkTrafficUrls["urls-3"] = merged.url;
+    }
+
+    // If user provides individual URL fields, respect those
+    for (let i = 1; i <= 11; i++) {
+      const urlField = `urls-${i}`;
+      if (merged[urlField]) {
+        sparkPayload[urlField] = merged[urlField];
+        sparkTrafficUrls[urlField] = merged[urlField];
+      }
+    }
+
+    // Handle legacy urls array format (but prioritize single URL approach)
+    if (merged.urls && Array.isArray(merged.urls) && !merged.url) {
+      merged.urls.forEach((url, index) => {
+        if (index < 11 && url && url.trim()) {
+          const urlKey = `urls-${index + 1}`;
+          sparkPayload[urlKey] = url.trim();
+          sparkTrafficUrls[urlKey] = url.trim();
+        }
+      });
+    }
 
     try {
       const vendorResp = await vendor.createProject(sparkPayload);
@@ -280,7 +329,7 @@ router.post("/campaigns", auth(), async (req, res) => {
       const camp = new Campaign({
         user: userId,
         title: sparkPayload.title,
-        urls: merged.urls,
+        urls: merged.urls || [], // Keep for backward compatibility
         duration_min: merged.duration[0],
         duration_max: merged.duration[1],
         countries: countriesData,
@@ -290,7 +339,12 @@ router.post("/campaigns", auth(), async (req, res) => {
         is_coin_mining: merged.is_coin_mining,
         spark_traffic_project_id: projectId,
         state: "created",
-        metadata: { ...body.metadata, vendor: "sparkTraffic", route: "alpha" },
+        metadata: { 
+          ...body.metadata, 
+          vendor: "sparkTraffic", 
+          route: "alpha",
+          sparkTrafficUrls: sparkTrafficUrls // Store the URL mapping
+        },
         spark_traffic_data: vendorResp,
       });
 
@@ -345,9 +399,9 @@ router.get("/campaigns", auth(), async (req, res) => {
     const skip = (page - 1) * limit;
 
     // Build query filters - only SparkTraffic campaigns
-    const query = { 
+    const query = {
       user: userId,
-      spark_traffic_project_id: { $exists: true, $ne: null }
+      spark_traffic_project_id: { $exists: true, $ne: null },
     };
 
     // Filter by status if provided
@@ -799,19 +853,69 @@ router.post("/campaigns/:id/modify", auth(), async (req, res) => {
       };
 
       // Map fields exactly as per SparkTraffic documentation
+      if (req.body.created_at !== undefined)
+        modifyPayload.created_at = req.body.created_at;
+      if (req.body.expires_at !== undefined)
+        modifyPayload.expires_at = req.body.expires_at;
       if (req.body.title) modifyPayload.title = req.body.title;
+      if (req.body.size) modifyPayload.size = req.body.size;
+      if (req.body.multiplier !== undefined)
+        modifyPayload.multiplier = req.body.multiplier;
       if (req.body.speed !== undefined) modifyPayload.speed = req.body.speed;
-      if (req.body.traffic_type) modifyPayload.traffic_type = req.body.traffic_type;
+      if (req.body.traffic_type)
+        modifyPayload.traffic_type = req.body.traffic_type;
       if (req.body.keywords) modifyPayload.keywords = req.body.keywords;
-      if (req.body.bounce_rate !== undefined) modifyPayload.bounce_rate = req.body.bounce_rate;
-      if (req.body.time_on_page) modifyPayload.time_on_page = req.body.time_on_page;
+      if (req.body.referrers) {
+        if (typeof req.body.referrers === "object" && req.body.referrers.urls) {
+          modifyPayload.referrers = req.body.referrers.urls.join(",");
+        } else if (typeof req.body.referrers === "string") {
+          modifyPayload.referrers = req.body.referrers;
+        }
+      }
+      if (req.body.social_links)
+        modifyPayload.social_links = req.body.social_links;
+      if (req.body.languages) modifyPayload.languages = req.body.languages;
+      if (req.body.bounce_rate !== undefined)
+        modifyPayload.bounce_rate = req.body.bounce_rate;
+      if (req.body.return_rate !== undefined)
+        modifyPayload.return_rate = req.body.return_rate;
+      if (req.body.click_outbound_events !== undefined)
+        modifyPayload.click_outbound_events = req.body.click_outbound_events;
+      if (req.body.form_submit_events !== undefined)
+        modifyPayload.form_submit_events = req.body.form_submit_events;
+      if (req.body.scroll_events !== undefined)
+        modifyPayload.scroll_events = req.body.scroll_events;
+      if (req.body.time_on_page)
+        modifyPayload.time_on_page = req.body.time_on_page;
+      if (req.body.desktop_rate !== undefined)
+        modifyPayload.desktop_rate = req.body.desktop_rate;
+      if (req.body.auto_renew) modifyPayload.auto_renew = req.body.auto_renew;
+      if (req.body.geo_type) modifyPayload.geo_type = req.body.geo_type;
+      if (req.body.shortener) modifyPayload.shortener = req.body.shortener;
+      if (req.body.rss_feed) modifyPayload.rss_feed = req.body.rss_feed;
+      if (req.body.ga_id) modifyPayload.ga_id = req.body.ga_id;
 
-      // Handle URLs
-      if (req.body.url) modifyPayload["urls-1"] = req.body.url;
-      if (req.body.urls) {
+      // Handle URLs in SparkTraffic format (urls-1, urls-2, etc.)
+      // Take single URL and populate urls-1, urls-2, urls-3 with the same URL
+      if (req.body.url) {
+        modifyPayload["urls-1"] = req.body.url;
+        modifyPayload["urls-2"] = req.body.url;
+        modifyPayload["urls-3"] = req.body.url;
+      }
+
+      // If user provides individual URL fields, respect those
+      for (let i = 1; i <= 11; i++) {
+        const urlField = `urls-${i}`;
+        if (req.body[urlField]) {
+          modifyPayload[urlField] = req.body[urlField];
+        }
+      }
+
+      // Handle legacy urls array format (but prioritize single URL approach)
+      if (req.body.urls && Array.isArray(req.body.urls) && !req.body.url) {
         req.body.urls.forEach((url, index) => {
-          if (index < 11 && url) {
-            modifyPayload[`urls-${index + 1}`] = url;
+          if (index < 11 && url && url.trim()) {
+            modifyPayload[`urls-${index + 1}`] = url.trim();
           }
         });
       }
@@ -952,7 +1056,8 @@ router.delete("/campaigns/:id", auth(), async (req, res) => {
 
     res.json({
       ok: true,
-      message: "Alpha campaign archived successfully. Will be permanently deleted after 7 days.",
+      message:
+        "Alpha campaign archived successfully. Will be permanently deleted after 7 days.",
       campaign: createCleanCampaignResponse(c),
       action: "archived",
       vendor: "sparkTraffic",
@@ -1126,13 +1231,18 @@ router.get("/campaigns/:id/report.pdf", auth(), async (req, res) => {
     });
 
     // Generate PDF report
-    const pdfBuffer = await generateCampaignReportPDF(req.params.id, { from, to });
+    const pdfBuffer = await generateCampaignReportPDF(req.params.id, {
+      from,
+      to,
+    });
 
     // Set response headers for PDF download
-    const filename = `alpha-campaign-${campaign.title || campaign._id}-report.pdf`;
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('Content-Length', pdfBuffer.length);
+    const filename = `alpha-campaign-${
+      campaign.title || campaign._id
+    }-report.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Length", pdfBuffer.length);
 
     logger.info("Alpha campaign PDF report generated successfully", {
       userId: req.user.id,
@@ -1149,9 +1259,9 @@ router.get("/campaigns/:id/report.pdf", auth(), async (req, res) => {
       error: err.message,
       stack: err.stack,
     });
-    res.status(500).json({ 
-      error: "Failed to generate Alpha campaign report", 
-      details: err.message 
+    res.status(500).json({
+      error: "Failed to generate Alpha campaign report",
+      details: err.message,
     });
   }
 });
