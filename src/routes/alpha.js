@@ -70,7 +70,7 @@ function createCleanCampaignResponse(
 ) {
   // Extract URLs from metadata if available, otherwise convert array format to SparkTraffic format
   let urlsDisplay = {};
-  
+
   // Check if we have SparkTraffic URL format in metadata
   if (campaign.metadata && campaign.metadata.sparkTrafficUrls) {
     urlsDisplay = campaign.metadata.sparkTrafficUrls;
@@ -245,13 +245,13 @@ router.post("/campaigns", auth(), async (req, res) => {
     // Handle URLs in SparkTraffic format (urls-1, urls-2, etc.)
     // Take single URL and populate urls-1, urls-2, urls-3 with the same URL
     const sparkTrafficUrls = {};
-    
+
     if (merged.url) {
       // Use the same URL for urls-1, urls-2, and urls-3
       sparkPayload["urls-1"] = merged.url;
       sparkPayload["urls-2"] = merged.url;
       sparkPayload["urls-3"] = merged.url;
-      
+
       sparkTrafficUrls["urls-1"] = merged.url;
       sparkTrafficUrls["urls-2"] = merged.url;
       sparkTrafficUrls["urls-3"] = merged.url;
@@ -339,11 +339,11 @@ router.post("/campaigns", auth(), async (req, res) => {
         is_coin_mining: merged.is_coin_mining,
         spark_traffic_project_id: projectId,
         state: "created",
-        metadata: { 
-          ...body.metadata, 
-          vendor: "sparkTraffic", 
+        metadata: {
+          ...body.metadata,
+          vendor: "sparkTraffic",
           route: "alpha",
-          sparkTrafficUrls: sparkTrafficUrls // Store the URL mapping
+          sparkTrafficUrls: sparkTrafficUrls, // Store the URL mapping
         },
         spark_traffic_data: vendorResp,
       });
