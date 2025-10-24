@@ -62,6 +62,76 @@ function validateGeoFormat(geo) {
   return { valid: true };
 }
 
+// Helper function to fetch SparkTraffic stats for a single campaign
+async function fetchCampaignStats(campaign) {
+  if (!campaign.spark_traffic_project_id) {
+    return null;
+  }
+
+  try {
+    const axios = require("axios");
+    const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+    const now = new Date();
+    const createdDate = campaign.createdAt
+      ? campaign.createdAt.toISOString().split("T")[0]
+      : now.toISOString().split("T")[0];
+
+    // Get stats data
+    const statsResp = await axios.post(
+      "https://v2.sparktraffic.com/get-website-traffic-project-stats",
+      null,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          API_KEY,
+        },
+        params: {
+          unique_id: campaign.spark_traffic_project_id,
+          from: createdDate,
+          to: now.toISOString().split("T")[0],
+        },
+      }
+    );
+
+    if (statsResp.data) {
+      // Calculate total hits and visits
+      let totalHits = 0;
+      let totalVisits = 0;
+
+      if (Array.isArray(statsResp.data.hits)) {
+        statsResp.data.hits.forEach((hitData) => {
+          Object.values(hitData).forEach((count) => {
+            totalHits += parseInt(count) || 0;
+          });
+        });
+      }
+
+      if (Array.isArray(statsResp.data.visits)) {
+        statsResp.data.visits.forEach((visitData) => {
+          Object.values(visitData).forEach((count) => {
+            totalVisits += parseInt(count) || 0;
+          });
+        });
+      }
+
+      return {
+        ...statsResp.data,
+        totalHits,
+        totalVisits,
+        speed: campaign.state === "paused" ? 0 : 200, // Default speed or fetch from project details
+      };
+    }
+  } catch (err) {
+    logger.error("Failed to fetch campaign stats for list", {
+      campaignId: campaign._id,
+      sparkTrafficProjectId: campaign.spark_traffic_project_id,
+      error: err.message,
+    });
+  }
+
+  return null;
+}
+
 // Helper function to create clean campaign response (hiding implementation details)
 function createCleanCampaignResponse(
   campaign,
@@ -482,14 +552,34 @@ router.get("/", auth(), async (req, res) => {
       },
     });
 
-    // Clean up campaign data to hide implementation details
-    const cleanCampaigns = campaigns.map((campaign) =>
-      createCleanCampaignResponse(campaign)
+    // Fetch stats for each campaign and create clean responses
+    const campaignsWithStats = await Promise.all(
+      campaigns.map(async (campaign) => {
+        // Check if user wants stats included (via query parameter)
+        const includeStats = req.query.include_stats === 'true';
+        
+        if (includeStats && campaign.spark_traffic_project_id) {
+          const vendorStats = await fetchCampaignStats(campaign);
+          return createCleanCampaignResponse(campaign, true, vendorStats);
+        } else {
+          // For performance, include basic stats from database if available
+          const basicStats = campaign.spark_traffic_project_id ? {
+            totalHits: campaign.total_hits_counted || 0,
+            totalVisits: campaign.total_visits_counted || 0,
+            speed: campaign.state === "paused" ? 0 : 200,
+            status: campaign.state === "paused" ? "paused" : "active",
+            dailyHits: [],
+            dailyVisits: [],
+          } : null;
+          
+          return createCleanCampaignResponse(campaign, !!basicStats, basicStats);
+        }
+      })
     );
 
     res.json({
       ok: true,
-      campaigns: cleanCampaigns,
+      campaigns: campaignsWithStats,
       pagination: {
         page,
         limit,
