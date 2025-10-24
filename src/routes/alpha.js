@@ -8,6 +8,7 @@ const {
   processAllCampaignCredits,
 } = require("../services/creditDeduction");
 const { generateCampaignReportPDF } = require("../services/reportService");
+const alphaTrafficTrackingService = require("../services/alphaTrafficTrackingService");
 const logger = require("../utils/logger");
 
 const router = express.Router();
@@ -424,6 +425,27 @@ router.post("/campaigns", auth(), async (req, res) => {
       user.availableHits -= requiredHits;
       await user.save();
 
+      // Initialize Alpha traffic tracking for the new campaign
+      try {
+        await alphaTrafficTrackingService.initializeAlphaTrafficTracking(
+          camp._id.toString(),
+          projectId
+        );
+        logger.campaign("Alpha traffic tracking initialized", {
+          userId,
+          campaignId: camp._id,
+          sparkTrafficProjectId: projectId,
+        });
+      } catch (trackingErr) {
+        logger.error("Failed to initialize Alpha traffic tracking", {
+          userId,
+          campaignId: camp._id,
+          sparkTrafficProjectId: projectId,
+          error: trackingErr.message,
+        });
+        // Don't fail the campaign creation if tracking initialization fails
+      }
+
       logger.campaign("Alpha campaign created successfully", {
         userId,
         campaignId: camp._id,
@@ -511,8 +533,8 @@ router.get("/campaigns", auth(), async (req, res) => {
     const campaignsWithStats = await Promise.all(
       campaigns.map(async (campaign) => {
         // Check if user wants detailed stats (via query parameter)
-        const includeDetailedStats = req.query.include_stats === 'true';
-        
+        const includeDetailedStats = req.query.include_stats === "true";
+
         if (includeDetailedStats) {
           const vendorStats = await fetchCampaignStats(campaign);
           return createCleanCampaignResponse(campaign, true, vendorStats);

@@ -536,11 +536,216 @@
             "url": {
               "raw": "{{base_url}}/api/alpha/campaigns/{{campaign_id}}/report.pdf?from=2024-01-01&to=2024-01-31",
               "host": ["{{base_url}}"],
-              "path": ["api", "alpha", "campaigns", "{{campaign_id}}", "report.pdf"],
+              "path": [
+                "api",
+                "alpha",
+                "campaigns",
+                "{{campaign_id}}",
+                "report.pdf"
+              ],
               "query": [
                 { "key": "from", "value": "2024-01-01" },
                 { "key": "to", "value": "2024-01-31" }
               ]
+            }
+          }
+        },
+        {
+          "name": "📊 Get Current Alpha Traffic Metrics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/campaigns/{{campaign_id}}/alpha-traffic/current",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "campaigns",
+                "{{campaign_id}}",
+                "alpha-traffic",
+                "current"
+              ]
+            }
+          }
+        },
+        {
+          "name": "📈 Get Alpha Traffic Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/campaigns/{{campaign_id}}/alpha-traffic/summary?timeRange=1h&limit=24",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "campaigns",
+                "{{campaign_id}}",
+                "alpha-traffic",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "timeRange",
+                  "value": "1h",
+                  "description": "Time range: 1m, 15m, 1h, 7d, 30d"
+                },
+                {
+                  "key": "limit",
+                  "value": "24",
+                  "description": "Number of time windows to return"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "📊 Get Alpha Traffic Trends",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/campaigns/{{campaign_id}}/alpha-traffic/trends?timeRange=1h&periods=24",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "campaigns",
+                "{{campaign_id}}",
+                "alpha-traffic",
+                "trends"
+              ],
+              "query": [
+                {
+                  "key": "timeRange",
+                  "value": "1h",
+                  "description": "Time range for trend analysis"
+                },
+                {
+                  "key": "periods",
+                  "value": "24",
+                  "description": "Number of periods for trend calculation"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "📋 Get Raw Alpha Traffic Data",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/campaigns/{{campaign_id}}/alpha-traffic/raw?page=1&limit=10",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "campaigns",
+                "{{campaign_id}}",
+                "alpha-traffic",
+                "raw"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number for pagination"
+                },
+                {
+                  "key": "limit",
+                  "value": "10",
+                  "description": "Records per page"
+                },
+                {
+                  "key": "from",
+                  "value": "",
+                  "description": "Start date filter (ISO format)",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "description": "End date filter (ISO format)",
+                  "disabled": true
+                },
+                {
+                  "key": "projectStatus",
+                  "value": "",
+                  "description": "Filter by project status",
+                  "disabled": true
+                },
+                {
+                  "key": "dataQuality",
+                  "value": "",
+                  "description": "Filter by data quality",
+                  "disabled": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "🔄 Manual Alpha Traffic Collection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/campaigns/{{campaign_id}}/alpha-traffic/collect",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "campaigns",
+                "{{campaign_id}}",
+                "alpha-traffic",
+                "collect"
+              ]
+            }
+          }
+        },
+        {
+          "name": "🎯 Initialize Alpha Traffic Tracking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/campaigns/{{campaign_id}}/alpha-traffic/initialize",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "campaigns",
+                "{{campaign_id}}",
+                "alpha-traffic",
+                "initialize"
+              ]
+            }
+          }
+        },
+        {
+          "name": "⏰ Get Available Time Ranges",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/time-ranges",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha-traffic", "time-ranges"]
             }
           }
         }
@@ -1071,6 +1276,212 @@
               "query": [
                 { "key": "page", "value": "1" },
                 { "key": "limit", "value": "20" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📊 Admin - Alpha Traffic Management",
+      "item": [
+        {
+          "name": "📈 Get Alpha Traffic Collector Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/admin/alpha-traffic/collector/status",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "admin",
+                "alpha-traffic",
+                "collector",
+                "status"
+              ]
+            }
+          }
+        },
+        {
+          "name": "▶️ Start Alpha Traffic Collector",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"intervalMs\": 60000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/admin/alpha-traffic/collector/start",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "admin",
+                "alpha-traffic",
+                "collector",
+                "start"
+              ]
+            }
+          }
+        },
+        {
+          "name": "⏹️ Stop Alpha Traffic Collector",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/admin/alpha-traffic/collector/stop",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "admin",
+                "alpha-traffic",
+                "collector",
+                "stop"
+              ]
+            }
+          }
+        },
+        {
+          "name": "⚙️ Update Collector Interval",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"intervalMs\": 120000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/admin/alpha-traffic/collector/interval",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "admin",
+                "alpha-traffic",
+                "collector",
+                "interval"
+              ]
+            }
+          }
+        },
+        {
+          "name": "🔧 Update Collector Configuration",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"maxConcurrentRequests\": 5,\n  \"retryAttempts\": 3,\n  \"retryDelayMs\": 5000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/admin/alpha-traffic/collector/config",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "admin",
+                "alpha-traffic",
+                "collector",
+                "config"
+              ]
+            }
+          }
+        },
+        {
+          "name": "🔄 Collect All Alpha Campaigns",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/admin/alpha-traffic/collect-all",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "admin",
+                "alpha-traffic",
+                "collect-all"
+              ]
+            }
+          }
+        },
+        {
+          "name": "🗑️ Cleanup Old Alpha Traffic Data",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"retentionDays\": 90\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/admin/alpha-traffic/cleanup",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "admin",
+                "alpha-traffic",
+                "cleanup"
+              ]
+            }
+          }
+        },
+        {
+          "name": "📊 Get Alpha Traffic Statistics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-traffic/admin/alpha-traffic/statistics",
+              "host": ["{{base_url}}"],
+              "path": [
+                "api",
+                "alpha-traffic",
+                "admin",
+                "alpha-traffic",
+                "statistics"
               ]
             }
           }
