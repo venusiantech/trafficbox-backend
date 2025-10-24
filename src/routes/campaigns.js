@@ -562,17 +562,21 @@ router.get("/", auth(), async (req, res) => {
           const vendorStats = await fetchCampaignStats(campaign);
           return createCleanCampaignResponse(campaign, true, vendorStats);
         } else {
-          // For performance, include basic stats from database if available
-          const basicStats = campaign.spark_traffic_project_id ? {
-            totalHits: campaign.total_hits_counted || 0,
-            totalVisits: campaign.total_visits_counted || 0,
-            speed: campaign.state === "paused" ? 0 : 200,
-            status: campaign.state === "paused" ? "paused" : "active",
-            dailyHits: [],
-            dailyVisits: [],
-          } : null;
-          
-          return createCleanCampaignResponse(campaign, !!basicStats, basicStats);
+          // Always include basic stats for SparkTraffic campaigns
+          if (campaign.spark_traffic_project_id) {
+            const basicStats = {
+              totalHits: campaign.total_hits_counted || 0,
+              totalVisits: campaign.total_visits_counted || 0,
+              speed: campaign.state === "paused" ? 0 : 200,
+              status: campaign.state === "paused" ? "paused" : "active",
+              dailyHits: [],
+              dailyVisits: [],
+            };
+            return createCleanCampaignResponse(campaign, true, basicStats);
+          } else {
+            // No stats for non-SparkTraffic campaigns
+            return createCleanCampaignResponse(campaign, false, null);
+          }
         }
       })
     );
