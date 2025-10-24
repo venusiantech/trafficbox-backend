@@ -141,7 +141,7 @@ function createCleanCampaignResponse(
   return {
     id: campaign._id,
     title: campaign.title,
-    urls: campaign.urls,
+    urls: campaign.urls && campaign.urls.length > 0 ? campaign.urls[0] : "",
     duration_min: campaign.duration_min,
     duration_max: campaign.duration_max,
     countries: campaign.countries,
