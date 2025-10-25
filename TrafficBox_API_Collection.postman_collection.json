@@ -748,6 +748,62 @@
               "path": ["api", "alpha-traffic", "time-ranges"]
             }
           }
+        },
+        {
+          "name": "📊 Dashboard Overview",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-dashboard/overview",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha-dashboard", "overview"]
+            }
+          }
+        },
+        {
+          "name": "📈 Dashboard Trends",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-dashboard/trends?timeRange=24h&dataPoints=24",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha-dashboard", "trends"],
+              "query": [
+                {
+                  "key": "timeRange",
+                  "value": "24h",
+                  "description": "Time range: 24h, 7d, 30d"
+                },
+                {
+                  "key": "dataPoints",
+                  "value": "24",
+                  "description": "Number of data points to return"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "⚡ Dashboard Real-time",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-dashboard/realtime",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha-dashboard", "realtime"]
+            }
+          }
+        },
+        {
+          "name": "🌍 Dashboard Geography",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha-dashboard/geography",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha-dashboard", "geography"]
+            }
+          }
         }
       ]
     },
