@@ -482,6 +482,143 @@ router.post("/campaigns", auth(), async (req, res) => {
   }
 });
 
+// Get Alpha campaigns with time range filtering (SparkTraffic only)
+router.get("/campaigns/filter", auth(), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { timeRange = "7d" } = req.query;
+
+    // Validate time range
+    const validTimeRanges = ["1m", "15m", "1h", "7d", "30d"];
+    if (!validTimeRanges.includes(timeRange)) {
+      return res.status(400).json({
+        error: "Invalid time range. Valid options: 1m, 15m, 1h, 7d, 30d",
+      });
+    }
+
+    // Calculate date range based on timeRange parameter
+    const now = new Date();
+    let startDate;
+
+    switch (timeRange) {
+      case "1m":
+        startDate = new Date(now.getTime() - 1 * 60 * 1000); // 1 minute ago
+        break;
+      case "15m":
+        startDate = new Date(now.getTime() - 15 * 60 * 1000); // 15 minutes ago
+        break;
+      case "1h":
+        startDate = new Date(now.getTime() - 60 * 60 * 1000); // 1 hour ago
+        break;
+      case "7d":
+        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000); // 7 days ago
+        break;
+      case "30d":
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+        break;
+    }
+
+    // Build query filters - only SparkTraffic campaigns within time range
+    const query = {
+      user: userId,
+      spark_traffic_project_id: { $exists: true, $ne: null },
+      createdAt: { $gte: startDate, $lte: now },
+    };
+
+    // Filter by status if provided
+    if (req.query.status) {
+      query.state = req.query.status;
+    }
+
+    // Exclude archived campaigns by default unless specifically requested
+    if (!req.query.include_archived) {
+      query.$or = [{ is_archived: { $exists: false } }, { is_archived: false }];
+    }
+
+    // Get campaigns without pagination for time-filtered view
+    const campaigns = await Campaign.find(query)
+      .sort({ createdAt: -1 }) // Most recent first
+      .select("-spark_traffic_data") // Exclude large vendor data objects
+      .lean(); // Convert to plain objects for better performance
+
+    logger.campaign("Alpha campaigns retrieved with time filter", {
+      userId,
+      count: campaigns.length,
+      timeRange,
+      startDate: startDate.toISOString(),
+      endDate: now.toISOString(),
+      filters: {
+        status: req.query.status,
+        include_archived: req.query.include_archived,
+      },
+    });
+
+    // Fetch stats for each campaign and return only essential metrics
+    const campaignMetrics = await Promise.all(
+      campaigns.map(async (campaign) => {
+        // Check if user wants detailed stats (via query parameter)
+        const includeDetailedStats = req.query.include_stats === "true";
+        let stats = {
+          totalHits: 0,
+          totalVisits: 0,
+        };
+
+        if (includeDetailedStats) {
+          const vendorStats = await fetchCampaignStats(campaign);
+          if (vendorStats) {
+            stats.totalHits = vendorStats.totalHits || 0;
+            stats.totalVisits = vendorStats.totalVisits || 0;
+          }
+        } else {
+          // Use cached stats from database
+          stats.totalHits = campaign.total_hits_counted || 0;
+          stats.totalVisits = campaign.total_visits_counted || 0;
+        }
+
+        return {
+          id: campaign._id,
+          title: campaign.title,
+          createdAt: campaign.createdAt,
+          state: campaign.state,
+          totalHits: stats.totalHits,
+          totalVisits: stats.totalVisits,
+        };
+      })
+    );
+
+    // Calculate total metrics for the time range
+    const totalHits = campaignMetrics.reduce(
+      (sum, campaign) => sum + campaign.totalHits,
+      0
+    );
+    const totalVisits = campaignMetrics.reduce(
+      (sum, campaign) => sum + campaign.totalVisits,
+      0
+    );
+
+    res.json({
+      ok: true,
+      timeRange: {
+        selected: timeRange,
+        startDate: startDate.toISOString(),
+        endDate: now.toISOString(),
+        totalCampaigns: campaigns.length,
+        totalHits,
+        totalVisits,
+      },
+      campaigns: campaignMetrics,
+    });
+  } catch (err) {
+    logger.error("Get Alpha campaigns with time filter failed", {
+      userId: req.user.id,
+      error: err.message,
+      stack: err.stack,
+      query: req.query,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get all Alpha campaigns for authenticated user (SparkTraffic only)
 router.get("/campaigns", auth(), async (req, res) => {
   try {

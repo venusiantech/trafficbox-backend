@@ -430,6 +430,42 @@
           }
         },
         {
+          "name": "🕒 Get Alpha Campaigns with Time Filter",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/alpha/campaigns/filter?timeRange=7d&include_stats=true",
+              "host": ["{{base_url}}"],
+              "path": ["api", "alpha", "campaigns", "filter"],
+              "query": [
+                {
+                  "key": "timeRange",
+                  "value": "7d",
+                  "description": "Time range filter: 1m, 15m, 1h, 7d, 30d"
+                },
+                {
+                  "key": "status",
+                  "value": "created",
+                  "description": "Optional: Filter by campaign status",
+                  "disabled": true
+                },
+                {
+                  "key": "include_archived",
+                  "value": "false",
+                  "description": "Optional: Include archived campaigns",
+                  "disabled": true
+                },
+                {
+                  "key": "include_stats",
+                  "value": "true",
+                  "description": "Optional: Include detailed statistics"
+                }
+              ]
+            }
+          },
+          "description": "Get Alpha campaigns filtered by time range with simplified metrics (no pagination). Returns only essential data: campaign ID, title, creation date, state, total hits, and total visits. Supports time ranges: 1m (1 minute), 15m (15 minutes), 1h (1 hour), 7d (7 days), 30d (30 days). Perfect for dashboard overviews and quick metrics."
+        },
+        {
           "name": "Get Alpha Campaign by ID",
           "request": {
             "method": "GET",
