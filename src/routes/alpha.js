@@ -65,11 +65,41 @@ async function fetchCampaignStats(campaign) {
         });
       }
 
+      // Get actual project details to fetch real speed
+      let actualSpeed = campaign.state === "paused" ? 0 : 200; // Default fallback
+      
+      // First try to get speed from stored metadata (faster)
+      if (campaign.metadata && campaign.metadata.currentSpeed !== undefined) {
+        actualSpeed = campaign.state === "paused" ? 0 : campaign.metadata.currentSpeed;
+      } else {
+        // Fallback to API call if no stored speed
+        try {
+          const projectResp = await axios.post(
+            "https://v2.sparktraffic.com/modify-website-traffic-project",
+            {
+              unique_id: campaign.spark_traffic_project_id,
+            },
+            {
+              headers: {
+                "Content-Type": "application/json",
+                API_KEY,
+              },
+            }
+          );
+
+          if (projectResp.data && projectResp.data.speed !== undefined) {
+            actualSpeed = projectResp.data.speed;
+          }
+        } catch (projectErr) {
+          // Keep default speed if we can't fetch project details
+        }
+      }
+
       return {
         ...statsResp.data,
         totalHits,
         totalVisits,
-        speed: campaign.state === "paused" ? 0 : 200,
+        speed: actualSpeed,
       };
     }
   } catch (err) {
@@ -303,7 +333,7 @@ router.post("/campaigns", auth(), async (req, res) => {
       created_at: merged.created_at || Date.now(),
       expires_at: merged.expires_at || 0,
       title: merged.title,
-      size: "eco", // Use provided size or default to demo
+      size: merged.size || "eco", // Use provided size or default to eco
       multiplier: merged.multiplier || 0,
       speed: merged.speed || 200,
       traffic_type: merged.traffic_type || "direct",
@@ -431,11 +461,21 @@ router.post("/campaigns", auth(), async (req, res) => {
           vendor: "sparkTraffic",
           route: "alpha",
           sparkTrafficUrls: sparkTrafficUrls, // Store the URL mapping
+          currentSpeed: sparkPayload.speed || 200, // Store the current speed
         },
         spark_traffic_data: vendorResp,
       });
 
       await camp.save();
+
+      logger.campaign("Alpha campaign saved with metadata", {
+        userId,
+        campaignId: camp._id,
+        storedSpeed: camp.metadata?.currentSpeed,
+        sparkPayloadSpeed: sparkPayload.speed,
+        mergedSpeed: merged.speed,
+        requestBodySpeed: req.body.speed,
+      });
 
       // Deduct hits from user after successful campaign creation
       user.availableHits -= requiredHits;
@@ -472,7 +512,14 @@ router.post("/campaigns", auth(), async (req, res) => {
 
       return res.json({
         ok: true,
-        campaign: createCleanCampaignResponse(camp),
+        campaign: createCleanCampaignResponse(camp, true, {
+          totalHits: 0,
+          totalVisits: 0,
+          speed: sparkPayload.speed, // Use the actual speed from the request
+          status: "active",
+          dailyHits: [],
+          dailyVisits: [],
+        }),
         userStats: {
           hitsDeducted: requiredHits,
           remainingHits: user.availableHits,
@@ -692,11 +739,18 @@ router.get("/campaigns", auth(), async (req, res) => {
           const vendorStats = await fetchCampaignStats(campaign);
           return createCleanCampaignResponse(campaign, true, vendorStats);
         } else {
-          // Always include basic stats for Alpha SparkTraffic campaigns
+          // For basic stats, use stored speed from metadata or fallback
+          let actualSpeed = campaign.state === "paused" ? 0 : 200; // Default fallback
+          
+          // Try to get speed from stored metadata
+          if (campaign.metadata && campaign.metadata.currentSpeed !== undefined) {
+            actualSpeed = campaign.state === "paused" ? 0 : campaign.metadata.currentSpeed;
+          }
+          
           const basicStats = {
             totalHits: campaign.total_hits_counted || 0,
             totalVisits: campaign.total_visits_counted || 0,
-            speed: campaign.state === "paused" ? 0 : 200,
+            speed: actualSpeed,
             status: campaign.state === "paused" ? "paused" : "active",
             dailyHits: [],
             dailyVisits: [],
@@ -855,7 +909,9 @@ router.get("/campaigns/:id", auth(), async (req, res) => {
           ...statsResp.data,
           totalHits,
           totalVisits,
-          speed: projectDetails?.speed || (c.state === "paused" ? 0 : 200),
+          speed: projectDetails?.speed !== undefined ? projectDetails.speed : 
+                 (c.metadata?.currentSpeed !== undefined ? c.metadata.currentSpeed : 
+                  (c.state === "paused" ? 0 : 200)),
           ...(projectDetails && {
             projectDetails: {
               speed: projectDetails.speed,
@@ -877,6 +933,11 @@ router.get("/campaigns/:id", auth(), async (req, res) => {
       vendorStats = {
         error: "Failed to fetch vendor stats",
         details: err.message,
+        totalHits: 0,
+        totalVisits: 0,
+        speed: c.metadata?.currentSpeed !== undefined ? 
+               (c.state === "paused" ? 0 : c.metadata.currentSpeed) : 
+               (c.state === "paused" ? 0 : 200),
       };
     }
 
@@ -947,6 +1008,12 @@ router.post("/campaigns/:id/pause", auth(), async (req, res) => {
     }
 
     c.state = "paused";
+    // Update stored speed in metadata
+    if (c.metadata) {
+      c.metadata.currentSpeed = 0;
+    } else {
+      c.metadata = { currentSpeed: 0 };
+    }
     await c.save();
 
     return res.json({
@@ -1034,6 +1101,12 @@ router.post("/campaigns/:id/resume", auth(), async (req, res) => {
     c.state = "ok";
     c.userState = "running";
     c.credit_deduction_enabled = true; // Re-enable credit deduction when resuming
+    // Update stored speed in metadata (resume to 200 or previous speed)
+    if (c.metadata) {
+      c.metadata.currentSpeed = 200;
+    } else {
+      c.metadata = { currentSpeed: 200 };
+    }
     await c.save();
 
     logger.campaign("Alpha campaign resumed", {
@@ -1116,8 +1189,13 @@ router.post("/campaigns/:id/modify", auth(), async (req, res) => {
       if (req.body[f] !== undefined) c[f] = req.body[f];
     });
 
-    // Update metadata to maintain Alpha route info
-    c.metadata = { ...c.metadata, ...req.body.metadata, route: "alpha" };
+    // Update metadata to maintain Alpha route info and store current speed
+    c.metadata = { 
+      ...c.metadata, 
+      ...req.body.metadata, 
+      route: "alpha",
+      ...(req.body.speed !== undefined && { currentSpeed: req.body.speed })
+    };
 
     // Update on SparkTraffic
     let vendorResp = null;
