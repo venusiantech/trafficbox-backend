@@ -239,41 +239,99 @@ router.get("/overview", auth(), async (req, res) => {
   }
 });
 
-// Helper function to get time range metrics
+// Helper function to get time range metrics - calculate directly from AlphaTrafficData
 async function getTimeRangeMetrics(campaignIds) {
-  const timeRanges = ["15m", "1h", "7d", "30d"];
+  const timeRanges = {
+    "1m": 1 * 60 * 1000, // 1 minute in milliseconds
+    "15m": 15 * 60 * 1000, // 15 minutes
+    "1h": 60 * 60 * 1000, // 1 hour
+    "7d": 7 * 24 * 60 * 60 * 1000, // 7 days
+    "30d": 30 * 24 * 60 * 60 * 1000, // 30 days
+  };
+
+  const labels = {
+    "1m": "1 minute",
+    "15m": "15 minutes",
+    "1h": "1 hour",
+    "7d": "7 days",
+    "30d": "30 days",
+  };
+
   const metrics = {};
+  const now = new Date();
 
-  for (const range of timeRanges) {
-    const summaries = await AlphaTrafficSummary.find({
-      campaign: { $in: campaignIds },
-      timeRange: range,
-    })
-      .sort({ windowStart: -1 })
-      .limit(1);
+  for (const [range, durationMs] of Object.entries(timeRanges)) {
+    const startTime = new Date(now.getTime() - durationMs);
 
-    if (summaries.length > 0) {
-      const summary = summaries[0];
-      metrics[range] = {
-        totalHits: summary.totalHits,
-        totalVisits: summary.totalVisits,
-        totalViews: summary.totalViews,
-        uniqueVisitors: summary.uniqueVisitors,
-        avgSpeed: summary.avgSpeed,
-        avgBounceRate: summary.avgBounceRate,
-        lastUpdated: summary.lastUpdated,
-      };
-    } else {
-      metrics[range] = {
-        totalHits: 0,
-        totalVisits: 0,
-        totalViews: 0,
-        uniqueVisitors: 0,
-        avgSpeed: 0,
-        avgBounceRate: 0,
-        lastUpdated: null,
-      };
-    }
+    // Get traffic data for each campaign within this time range
+    const trafficData = await AlphaTrafficData.aggregate([
+      {
+        $match: {
+          campaign: { $in: campaignIds },
+          timestamp: { $gte: startTime },
+        },
+      },
+      {
+        $sort: { campaign: 1, timestamp: -1 },
+      },
+      {
+        $group: {
+          _id: "$campaign",
+          latestData: { $first: "$$ROOT" },
+        },
+      },
+      { $replaceRoot: { newRoot: "$latestData" } },
+    ]);
+
+    // Aggregate metrics for this time range
+    let totalHits = 0;
+    let totalViews = 0;
+    let totalVisits = 0;
+    let totalUniqueVisitors = 0;
+    let speedSum = 0;
+    let bounceRateSum = 0;
+    let validSpeedCount = 0;
+    let validBounceCount = 0;
+    let latestUpdate = null;
+
+    trafficData.forEach((data) => {
+      totalHits += data.hits || 0;
+      totalViews += data.views || 0;
+      totalVisits += data.visits || 0;
+      totalUniqueVisitors += data.uniqueVisitors || 0;
+
+      if (data.speed > 0) {
+        speedSum += data.speed;
+        validSpeedCount++;
+      }
+
+      if (data.bounceRate > 0) {
+        bounceRateSum += data.bounceRate;
+        validBounceCount++;
+      }
+
+      if (!latestUpdate || data.timestamp > latestUpdate) {
+        latestUpdate = data.timestamp;
+      }
+    });
+
+    metrics[range] = {
+      label: labels[range],
+      totalHits,
+      totalViews,
+      totalVisits,
+      uniqueVisitors: totalUniqueVisitors,
+      avgSpeed:
+        validSpeedCount > 0
+          ? Math.round((speedSum / validSpeedCount) * 100) / 100
+          : 0,
+      avgBounceRate:
+        validBounceCount > 0
+          ? Math.round((bounceRateSum / validBounceCount) * 100) / 100
+          : 0,
+      lastUpdated: latestUpdate,
+      campaignsCount: trafficData.length,
+    };
   }
 
   return metrics;
