@@ -249,6 +249,22 @@ router.post("/campaigns", auth(), async (req, res) => {
       });
     }
 
+    // Check user's credits before creating campaign (1 credit per hit minimum)
+    if (user.credits < requiredHits) {
+      logger.warn("Insufficient credits for Alpha campaign", {
+        userId,
+        userEmail: user.email,
+        requiredCredits: requiredHits,
+        availableCredits: user.credits,
+      });
+      return res.status(400).json({
+        error: "Insufficient credits",
+        required: requiredHits,
+        available: user.credits,
+        message: "Alpha campaigns require 1 credit per hit",
+      });
+    }
+
     // Ensure required fields have default values
     if (body.is_adult === undefined) body.is_adult = false;
     if (body.is_coin_mining === undefined) body.is_coin_mining = false;
@@ -957,7 +973,7 @@ router.post("/campaigns/:id/pause", auth(), async (req, res) => {
 // Resume Alpha campaign
 router.post("/campaigns/:id/resume", auth(), async (req, res) => {
   try {
-    const c = await Campaign.findById(req.params.id);
+    const c = await Campaign.findById(req.params.id).populate("user");
     if (!c || !c.spark_traffic_project_id) {
       logger.warn("Alpha campaign not found for resume", {
         userId: req.user.id,
@@ -966,13 +982,26 @@ router.post("/campaigns/:id/resume", auth(), async (req, res) => {
       return res.status(404).json({ error: "Alpha campaign not found" });
     }
 
-    if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
+    if (c.user._id.toString() !== req.user.id && req.user.role !== "admin") {
       logger.warn("Unauthorized Alpha resume attempt", {
         userId: req.user.id,
         campaignId: req.params.id,
-        campaignOwner: c.user.toString(),
+        campaignOwner: c.user._id.toString(),
       });
       return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Check if user has sufficient credits before resuming
+    if (c.user.credits <= 0) {
+      logger.warn("Cannot resume Alpha campaign - insufficient credits", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+        userCredits: c.user.credits,
+      });
+      return res.status(400).json({
+        error: "Cannot resume campaign - insufficient credits",
+        userCredits: c.user.credits,
+      });
     }
 
     let vendorResp = null;
@@ -1004,6 +1033,7 @@ router.post("/campaigns/:id/resume", auth(), async (req, res) => {
 
     c.state = "ok";
     c.userState = "running";
+    c.credit_deduction_enabled = true; // Re-enable credit deduction when resuming
     await c.save();
 
     logger.campaign("Alpha campaign resumed", {
@@ -1511,6 +1541,51 @@ router.get("/campaigns/:id/report.pdf", auth(), async (req, res) => {
       error: "Failed to generate Alpha campaign report",
       details: err.message,
     });
+  }
+});
+
+// Get user's credit status and paused campaigns
+router.get("/credit-status", auth(), async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Find paused Alpha campaigns due to insufficient credits
+    const pausedCampaigns = await Campaign.find({
+      user: req.user.id,
+      spark_traffic_project_id: { $exists: true, $ne: null },
+      state: "paused",
+      credit_deduction_enabled: false,
+    }).select("_id title urls spark_traffic_project_id createdAt");
+
+    logger.info("Credit status checked", {
+      userId: req.user.id,
+      userCredits: user.credits,
+      pausedCampaignsCount: pausedCampaigns.length,
+    });
+
+    return res.json({
+      ok: true,
+      credits: user.credits,
+      availableHits: user.availableHits,
+      pausedCampaigns: pausedCampaigns.map((campaign) => ({
+        id: campaign._id,
+        title: campaign.title,
+        url: campaign.urls[0] || "N/A",
+        createdAt: campaign.createdAt,
+        reason: "Insufficient credits",
+      })),
+      totalPausedCampaigns: pausedCampaigns.length,
+    });
+  } catch (err) {
+    logger.error("Credit status check failed", {
+      userId: req.user.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
   }
 });
 

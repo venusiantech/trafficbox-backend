@@ -9,8 +9,6 @@ const logger = require("../utils/logger");
  */
 async function processAllCampaignCredits() {
   try {
-    logger.info("Starting credit deduction process for all campaigns");
-
     // Find all active SparkTraffic campaigns that have credit deduction enabled
     const campaigns = await Campaign.find({
       spark_traffic_project_id: { $exists: true, $ne: null },
@@ -18,10 +16,6 @@ async function processAllCampaignCredits() {
       is_archived: { $ne: true },
       state: { $nin: ["archived", "deleted"] },
     }).populate("user", "credits availableHits email");
-
-    logger.info(
-      `Found ${campaigns.length} campaigns to process for credit deduction`
-    );
 
     let totalProcessed = 0;
     let totalErrors = 0;
@@ -40,7 +34,6 @@ async function processAllCampaignCredits() {
           campaignId: campaign._id,
           sparkTrafficProjectId: campaign.spark_traffic_project_id,
           error: error.message,
-          stack: error.stack,
         });
       }
     }
@@ -61,7 +54,6 @@ async function processAllCampaignCredits() {
   } catch (error) {
     logger.error("Credit deduction process failed", {
       error: error.message,
-      stack: error.stack,
     });
     throw error;
   }
@@ -93,14 +85,6 @@ async function processCampaignCredits(campaign) {
       // Start from the last check date to avoid double counting
       fromDate = campaign.last_stats_check.toISOString().split("T")[0];
     }
-
-    logger.debug("Processing campaign credits", {
-      campaignId: campaign._id,
-      sparkTrafficProjectId: campaign.spark_traffic_project_id,
-      dateRange: { from: fromDate, to: currentDate },
-      lastStatsCheck: campaign.last_stats_check,
-      totalHitsCounted: campaign.total_hits_counted || 0,
-    });
 
     // Call SparkTraffic stats API
     const statsResp = await axios.post(
@@ -204,13 +188,6 @@ async function processCampaignCredits(campaign) {
         actualNewHits = 0;
         campaign.total_hits_counted = totalHitsEver;
         campaign.total_visits_counted = totalVisitsEver;
-
-        logger.debug("First check - establishing baseline", {
-          campaignId: campaign._id,
-          totalHitsEver,
-          baselineSet: totalHitsEver,
-          chargedHits: 0,
-        });
       } catch (err) {
         logger.error("Failed to get total hits for baseline", {
           campaignId: campaign._id,
@@ -266,14 +243,6 @@ async function processCampaignCredits(campaign) {
 
         // Update the total visits counted to the current cumulative total
         campaign.total_visits_counted = totalVisitsEver;
-
-        logger.debug("Subsequent check - calculating new hits", {
-          campaignId: campaign._id,
-          totalHitsEver,
-          totalVisitsEver,
-          previousHitsCounted,
-          actualNewHits,
-        });
       } catch (err) {
         logger.error("Failed to get total hits for comparison", {
           campaignId: campaign._id,
@@ -283,14 +252,6 @@ async function processCampaignCredits(campaign) {
         actualNewHits = 0;
       }
     }
-
-    logger.debug("Credit calculation details", {
-      campaignId: campaign._id,
-      totalHitsInPeriod,
-      previousHitsCounted,
-      actualNewHits,
-      isFirstCheck: !campaign.last_stats_check,
-    });
 
     if (actualNewHits > 0) {
       // Deduct credits based on new hits (1 credit per hit as an example)
@@ -307,7 +268,46 @@ async function processCampaignCredits(campaign) {
           newHits: actualNewHits,
         });
 
-        // Optionally pause the campaign if insufficient credits
+        // Pause the campaign at SparkTraffic API level if insufficient credits
+        if (campaign.spark_traffic_project_id) {
+          try {
+            const axios = require("axios");
+            const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+
+            await axios.post(
+              "https://v2.sparktraffic.com/modify-website-traffic-project",
+              {
+                unique_id: campaign.spark_traffic_project_id,
+                speed: 0, // Set speed to 0 to pause traffic
+              },
+              {
+                headers: {
+                  "Content-Type": "application/json",
+                  API_KEY,
+                },
+              }
+            );
+
+            logger.info("Campaign paused due to insufficient credits", {
+              campaignId: campaign._id,
+              userId: campaign.user._id,
+              sparkTrafficProjectId: campaign.spark_traffic_project_id,
+              creditsToDeduct,
+              availableCredits: campaign.user.credits,
+            });
+          } catch (apiError) {
+            logger.error(
+              "Failed to pause SparkTraffic campaign due to insufficient credits",
+              {
+                campaignId: campaign._id,
+                sparkTrafficProjectId: campaign.spark_traffic_project_id,
+                error: apiError.message,
+              }
+            );
+          }
+        }
+
+        // Pause the campaign locally
         campaign.state = "paused";
         campaign.credit_deduction_enabled = false;
         await campaign.save();
@@ -328,6 +328,52 @@ async function processCampaignCredits(campaign) {
 
       await campaign.user.save();
 
+      // Check if credits went below zero and pause campaign if so
+      if (campaign.user.credits < 0) {
+        logger.warn("User credits went below zero, pausing campaign", {
+          campaignId: campaign._id,
+          userId: campaign.user._id,
+          userEmail: campaign.user.email,
+          currentCredits: campaign.user.credits,
+        });
+
+        // Pause the campaign at SparkTraffic API level
+        if (campaign.spark_traffic_project_id) {
+          try {
+            await axios.post(
+              "https://v2.sparktraffic.com/modify-website-traffic-project",
+              {
+                unique_id: campaign.spark_traffic_project_id,
+                speed: 0, // Set speed to 0 to pause traffic
+              },
+              {
+                headers: {
+                  "Content-Type": "application/json",
+                  API_KEY,
+                },
+              }
+            );
+
+            logger.info("Campaign paused due to negative credits", {
+              campaignId: campaign._id,
+              sparkTrafficProjectId: campaign.spark_traffic_project_id,
+              currentCredits: campaign.user.credits,
+            });
+          } catch (apiError) {
+            logger.error("Failed to pause SparkTraffic campaign", {
+              campaignId: campaign._id,
+              sparkTrafficProjectId: campaign.spark_traffic_project_id,
+              error: apiError.message,
+            });
+          }
+        }
+
+        // Pause the campaign locally
+        campaign.state = "paused";
+        campaign.credit_deduction_enabled = false;
+        await campaign.save();
+      }
+
       // Update campaign tracking - add the new hits to the total counted
       const newTotalCounted =
         (campaign.total_hits_counted || 0) + actualNewHits;
@@ -337,18 +383,6 @@ async function processCampaignCredits(campaign) {
       // which is handled in the baseline establishment and subsequent checks above
       campaign.last_stats_check = now;
       await campaign.save();
-
-      logger.info("Credits and hits deducted successfully", {
-        campaignId: campaign._id,
-        userId: campaign.user._id,
-        userEmail: campaign.user.email,
-        newHits: actualNewHits,
-        creditsDeducted: creditsToDeduct,
-        hitsDeducted: actualNewHits,
-        remainingCredits: campaign.user.credits,
-        remainingHits: campaign.user.availableHits,
-        totalHitsCounted: campaign.total_hits_counted,
-      });
 
       return {
         success: true,
@@ -361,13 +395,6 @@ async function processCampaignCredits(campaign) {
       // No new hits, just update the check time
       campaign.last_stats_check = now;
       await campaign.save();
-
-      logger.debug("No new hits to charge for", {
-        campaignId: campaign._id,
-        totalHitsInPeriod,
-        previousHitsCounted,
-        actualNewHits,
-      });
 
       return {
         success: true,
