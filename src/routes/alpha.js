@@ -1171,7 +1171,25 @@ router.post("/campaigns/:id/modify", auth(), async (req, res) => {
       "metadata",
     ];
 
-    // Validate geo format if provided
+    // Handle geo mapping to countries for MongoDB storage
+    if (req.body.geo) {
+      // Map geo to countries for MongoDB storage
+      req.body.countries = req.body.geo;
+      
+      // Validate geo format
+      const geoValidation = validateGeoFormat(req.body.geo);
+      if (!geoValidation.valid) {
+        logger.error("Invalid geo format in Alpha modify", {
+          userId: req.user.id,
+          campaignId: req.params.id,
+          geo: req.body.geo,
+          error: geoValidation.error,
+        });
+        return res.status(400).json({ error: geoValidation.error });
+      }
+    }
+
+    // Validate geo format if countries is provided directly
     if (req.body.countries) {
       const geoValidation = validateGeoFormat(req.body.countries);
       if (!geoValidation.valid) {
