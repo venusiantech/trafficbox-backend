@@ -1,13 +1,14 @@
-const express = require("express");
+﻿const express = require("express");
 const auth = require("../middleware/auth");
 const Campaign = require("../models/Campaign");
 const AlphaTrafficData = require("../models/AlphaTrafficData");
 const AlphaTrafficSummary = require("../models/AlphaTrafficSummary");
+const alphaTrafficTrackingService = require("../services/alphaTrafficTrackingService");
 const logger = require("../utils/logger");
 
 const router = express.Router();
 
-// Get Alpha dashboard overview - aggregated data from all user's Alpha campaigns
+// Get Alpha dashboard overview - aggregated data from all user''s Alpha campaigns
 router.get("/overview", auth(), async (req, res) => {
   try {
     const userId = req.user.id;
@@ -47,27 +48,27 @@ router.get("/overview", auth(), async (req, res) => {
       });
     }
 
-    // Get the latest traffic data for each campaign (most recent cumulative totals)
-    const latestTrafficData = await AlphaTrafficData.aggregate([
-      { $match: { campaign: { $in: campaignIds } } },
-      { $sort: { campaign: 1, timestamp: -1 } },
-      {
-        $group: {
-          _id: "$campaign",
-          latestData: { $first: "$$ROOT" },
-        },
-      },
-      { $replaceRoot: { newRoot: "$latestData" } },
-      {
-        $lookup: {
-          from: "campaigns",
-          localField: "campaign",
-          foreignField: "_id",
-          as: "campaignInfo",
-        },
-      },
-      { $unwind: "$campaignInfo" },
-    ]);
+    // Fetch real-time metrics for all campaigns using the alphaTrafficTrackingService
+    const campaignMetricsPromises = alphaCampaigns.map(async (campaign) => {
+      try {
+        const currentMetrics = await alphaTrafficTrackingService.getCurrentAlphaTrafficMetrics(campaign._id.toString());
+        return {
+          campaign,
+          currentMetrics,
+        };
+      } catch (error) {
+        logger.error("Failed to get metrics for campaign", {
+          campaignId: campaign._id,
+          error: error.message,
+        });
+        return {
+          campaign,
+          currentMetrics: null,
+        };
+      }
+    });
+
+    const campaignMetricsResults = await Promise.all(campaignMetricsPromises);
 
     // Create a map of campaign statuses for quick lookup
     const campaignStatusMap = new Map();
@@ -78,7 +79,7 @@ router.get("/overview", auth(), async (req, res) => {
       );
     });
 
-    // Calculate aggregate metrics
+    // Calculate aggregate metrics from real-time data
     let totalHits = 0;
     let totalVisits = 0;
     let totalViews = 0;
@@ -89,10 +90,12 @@ router.get("/overview", auth(), async (req, res) => {
     const countryMap = new Map();
     const campaignPerformance = [];
     const allUniqueCountries = new Set(); // Track all unique countries across campaigns
+    const timeRangeMetricsAggregated = {};
 
-    latestTrafficData.forEach((data) => {
-      const campaignStatus =
-        campaignStatusMap.get(data.campaign.toString()) || "unknown";
+    campaignMetricsResults.forEach(({ campaign, currentMetrics }) => {
+      if (!currentMetrics) return;
+
+      const campaignStatus = campaignStatusMap.get(campaign._id.toString()) || "unknown";
 
       // Map campaign state to user-friendly status (matching alpha.js logic)
       const userFriendlyStatus =
@@ -106,21 +109,24 @@ router.get("/overview", auth(), async (req, res) => {
 
       const isActiveCampaign = userFriendlyStatus === "active";
 
+      // Use the 1h metrics as the primary source for totals (matching existing behavior)
+      const primaryMetrics = currentMetrics["1h"] || {};
+
       // Only count metrics for active campaigns
       if (isActiveCampaign) {
-        totalHits += data.hits || 0;
-        totalVisits += data.visits || 0;
-        totalViews += data.views || 0;
-        uniqueVisitors += data.uniqueVisitors || 0;
+        totalHits += primaryMetrics.totalHits || 0;
+        totalVisits += primaryMetrics.totalVisits || 0;
+        totalViews += primaryMetrics.totalViews || 0;
+        uniqueVisitors += primaryMetrics.uniqueVisitors || 0;
 
-        if (data.speed > 0) {
-          speedSum += data.speed;
+        if (primaryMetrics.avgSpeed > 0) {
+          speedSum += primaryMetrics.avgSpeed;
           validDataCount++;
         }
 
         // Aggregate country data only for active campaigns
-        if (data.countryBreakdown && Array.isArray(data.countryBreakdown)) {
-          data.countryBreakdown.forEach((country) => {
+        if (primaryMetrics.countryBreakdown && Array.isArray(primaryMetrics.countryBreakdown)) {
+          primaryMetrics.countryBreakdown.forEach((country) => {
             if (country.country) {
               const existing = countryMap.get(country.country) || {
                 hits: 0,
@@ -136,17 +142,64 @@ router.get("/overview", auth(), async (req, res) => {
         }
       }
 
+      // Aggregate time range metrics across all campaigns
+      for (const [rangeKey, rangeMetrics] of Object.entries(currentMetrics)) {
+        if (!timeRangeMetricsAggregated[rangeKey]) {
+          timeRangeMetricsAggregated[rangeKey] = {
+            label: rangeMetrics.label,
+            totalHits: 0,
+            totalViews: 0,
+            totalVisits: 0,
+            uniqueVisitors: 0,
+            avgSpeed: 0,
+            avgBounceRate: 0,
+            speedSum: 0,
+            bounceRateSum: 0,
+            validSpeedCount: 0,
+            validBounceCount: 0,
+            lastUpdated: null,
+            campaignsCount: 0,
+          };
+        }
+
+        const aggregated = timeRangeMetricsAggregated[rangeKey];
+        aggregated.totalHits += rangeMetrics.totalHits || 0;
+        aggregated.totalViews += rangeMetrics.totalViews || 0;
+        aggregated.totalVisits += rangeMetrics.totalVisits || 0;
+        aggregated.uniqueVisitors += rangeMetrics.uniqueVisitors || 0;
+
+        if (rangeMetrics.avgSpeed > 0) {
+          aggregated.speedSum += rangeMetrics.avgSpeed;
+          aggregated.validSpeedCount++;
+        }
+
+        if (rangeMetrics.avgBounceRate > 0) {
+          aggregated.bounceRateSum += rangeMetrics.avgBounceRate;
+          aggregated.validBounceCount++;
+        }
+
+        if (rangeMetrics.lastUpdated) {
+          if (!aggregated.lastUpdated || new Date(rangeMetrics.lastUpdated) > new Date(aggregated.lastUpdated)) {
+            aggregated.lastUpdated = rangeMetrics.lastUpdated;
+          }
+        }
+
+        if (rangeMetrics.totalHits > 0 || rangeMetrics.totalVisits > 0) {
+          aggregated.campaignsCount++;
+        }
+      }
+
       // Campaign performance data (include all campaigns but show status)
       const campaignCountries = [];
 
       // Check if campaign has countries configured (regardless of geo_type)
       if (
-        data.campaignInfo.countries &&
-        Array.isArray(data.campaignInfo.countries) &&
-        data.campaignInfo.countries.length > 0
+        campaign.countries &&
+        Array.isArray(campaign.countries) &&
+        campaign.countries.length > 0
       ) {
         // Extract countries based on format
-        data.campaignInfo.countries.forEach((country) => {
+        campaign.countries.forEach((country) => {
           if (typeof country === "string") {
             // Old format: array of country codes
             campaignCountries.push(country);
@@ -163,20 +216,40 @@ router.get("/overview", auth(), async (req, res) => {
       const geoType = campaignCountries.length > 0 ? "countries" : "global";
 
       campaignPerformance.push({
-        campaignId: data.campaign,
-        title: data.campaignInfo.title,
-        projectId: data.campaignInfo.spark_traffic_project_id,
-        hits: data.hits || 0,
-        visits: data.visits || 0,
-        views: data.views || 0,
-        uniqueVisitors: data.uniqueVisitors || 0,
-        speed: data.speed || 0,
-        lastUpdated: data.timestamp,
+        campaignId: campaign._id,
+        title: campaign.title,
+        projectId: campaign.spark_traffic_project_id,
+        hits: primaryMetrics.totalHits || 0,
+        visits: primaryMetrics.totalVisits || 0,
+        views: primaryMetrics.totalViews || 0,
+        uniqueVisitors: primaryMetrics.uniqueVisitors || 0,
+        speed: primaryMetrics.avgSpeed || 0,
+        lastUpdated: primaryMetrics.lastUpdated,
         campaignStatus: userFriendlyStatus,
         geoType: geoType,
         countries: campaignCountries,
       });
     });
+
+    // Calculate averages for time range metrics
+    const timeRangeMetrics = {};
+    for (const [rangeKey, aggregated] of Object.entries(timeRangeMetricsAggregated)) {
+      timeRangeMetrics[rangeKey] = {
+        label: aggregated.label,
+        totalHits: aggregated.totalHits,
+        totalViews: aggregated.totalViews,
+        totalVisits: aggregated.totalVisits,
+        uniqueVisitors: aggregated.uniqueVisitors,
+        avgSpeed: aggregated.validSpeedCount > 0 
+          ? Math.round((aggregated.speedSum / aggregated.validSpeedCount) * 100) / 100 
+          : 0,
+        avgBounceRate: aggregated.validBounceCount > 0 
+          ? Math.round((aggregated.bounceRateSum / aggregated.validBounceCount) * 100) / 100 
+          : 0,
+        lastUpdated: aggregated.lastUpdated,
+        campaignsCount: aggregated.campaignsCount,
+      };
+    }
 
     // Calculate averages
     const averageSpeed = validDataCount > 0 ? speedSum / validDataCount : 0;
@@ -205,9 +278,6 @@ router.get("/overview", auth(), async (req, res) => {
       topCountriesFromTraffic.length > 0
         ? topCountriesFromTraffic
         : allCountriesList;
-
-    // Get time range metrics (15m, 1h, 7d, 30d aggregates)
-    const timeRangeMetrics = await getTimeRangeMetrics(campaignIds);
 
     res.json({
       ok: true,
@@ -238,103 +308,5 @@ router.get("/overview", auth(), async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
-// Helper function to get time range metrics - calculate directly from AlphaTrafficData
-async function getTimeRangeMetrics(campaignIds) {
-  const timeRanges = {
-    "1m": 1 * 60 * 1000, // 1 minute in milliseconds
-    "15m": 15 * 60 * 1000, // 15 minutes
-    "1h": 60 * 60 * 1000, // 1 hour
-    "7d": 7 * 24 * 60 * 60 * 1000, // 7 days
-    "30d": 30 * 24 * 60 * 60 * 1000, // 30 days
-  };
-
-  const labels = {
-    "1m": "1 minute",
-    "15m": "15 minutes",
-    "1h": "1 hour",
-    "7d": "7 days",
-    "30d": "30 days",
-  };
-
-  const metrics = {};
-  const now = new Date();
-
-  for (const [range, durationMs] of Object.entries(timeRanges)) {
-    const startTime = new Date(now.getTime() - durationMs);
-
-    // Get traffic data for each campaign within this time range
-    const trafficData = await AlphaTrafficData.aggregate([
-      {
-        $match: {
-          campaign: { $in: campaignIds },
-          timestamp: { $gte: startTime },
-        },
-      },
-      {
-        $sort: { campaign: 1, timestamp: -1 },
-      },
-      {
-        $group: {
-          _id: "$campaign",
-          latestData: { $first: "$$ROOT" },
-        },
-      },
-      { $replaceRoot: { newRoot: "$latestData" } },
-    ]);
-
-    // Aggregate metrics for this time range
-    let totalHits = 0;
-    let totalViews = 0;
-    let totalVisits = 0;
-    let totalUniqueVisitors = 0;
-    let speedSum = 0;
-    let bounceRateSum = 0;
-    let validSpeedCount = 0;
-    let validBounceCount = 0;
-    let latestUpdate = null;
-
-    trafficData.forEach((data) => {
-      totalHits += data.hits || 0;
-      totalViews += data.views || 0;
-      totalVisits += data.visits || 0;
-      totalUniqueVisitors += data.uniqueVisitors || 0;
-
-      if (data.speed > 0) {
-        speedSum += data.speed;
-        validSpeedCount++;
-      }
-
-      if (data.bounceRate > 0) {
-        bounceRateSum += data.bounceRate;
-        validBounceCount++;
-      }
-
-      if (!latestUpdate || data.timestamp > latestUpdate) {
-        latestUpdate = data.timestamp;
-      }
-    });
-
-    metrics[range] = {
-      label: labels[range],
-      totalHits,
-      totalViews,
-      totalVisits,
-      uniqueVisitors: totalUniqueVisitors,
-      avgSpeed:
-        validSpeedCount > 0
-          ? Math.round((speedSum / validSpeedCount) * 100) / 100
-          : 0,
-      avgBounceRate:
-        validBounceCount > 0
-          ? Math.round((bounceRateSum / validBounceCount) * 100) / 100
-          : 0,
-      lastUpdated: latestUpdate,
-      campaignsCount: trafficData.length,
-    };
-  }
-
-  return metrics;
-}
 
 module.exports = router;
