@@ -1,7 +1,61 @@
 const axios = require("axios");
+const http = require("http");
+const https = require("https");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
 const logger = require("../utils/logger");
+
+// Reusable axios instance with keep-alive to reduce socket churn
+const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
+const keepAliveHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50 });
+
+const axiosInstance = axios.create({
+  httpAgent: keepAliveHttpAgent,
+  httpsAgent: keepAliveHttpsAgent,
+  // default timeout; can be overridden per request
+  timeout: 20000,
+});
+
+async function postWithRetry(url, data, config = {}, retryCfg = {}) {
+  const {
+    retries = 3,
+    baseDelayMs = 2000,
+    retryOnStatuses = [429, 500, 502, 503, 504],
+  } = retryCfg;
+
+  let lastError;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await axiosInstance.post(url, data, config);
+    } catch (error) {
+      lastError = error;
+      const status = error.response?.status;
+      const code = error.code;
+
+      const isRetryableStatus = retryOnStatuses.includes(status);
+      const isRetryableCode = [
+        "ECONNRESET",
+        "ECONNABORTED",
+        "ETIMEDOUT",
+        "EAI_AGAIN",
+        "ENOTFOUND",
+      ].includes(code);
+
+      // Only retry on network errors / transient server errors
+      if (!(isRetryableStatus || isRetryableCode)) {
+        break;
+      }
+
+      // Backoff with jitter
+      if (attempt < retries) {
+        const delay = baseDelayMs * Math.pow(2, attempt - 1);
+        const jitter = Math.floor(Math.random() * 250);
+        await new Promise((r) => setTimeout(r, delay + jitter));
+      }
+    }
+  }
+  throw lastError;
+}
 
 /**
  * Checks for new hits and deducts credits for SparkTraffic campaigns
@@ -11,10 +65,14 @@ async function processAllCampaignCredits() {
   try {
     // Find all active SparkTraffic campaigns that have credit deduction enabled
     const campaigns = await Campaign.find({
+      // Must be a SparkTraffic campaign
       spark_traffic_project_id: { $exists: true, $ne: null },
+      // Credit deduction must be enabled
       credit_deduction_enabled: { $ne: false },
+      // Exclude archived campaigns
       is_archived: { $ne: true },
-      state: { $nin: ["archived", "deleted"] },
+      // Only process ACTIVE states (skip paused/stopped/deleted)
+      state: { $in: ["created", "ok", "running"] },
     }).populate("user", "credits availableHits email");
 
     let totalProcessed = 0;
@@ -87,7 +145,7 @@ async function processCampaignCredits(campaign) {
     }
 
     // Call SparkTraffic stats API
-    const statsResp = await axios.post(
+    const statsResp = await postWithRetry(
       "https://v2.sparktraffic.com/get-website-traffic-project-stats",
       null,
       {
@@ -100,7 +158,9 @@ async function processCampaignCredits(campaign) {
           from: fromDate,
           to: currentDate,
         },
-      }
+        timeout: 20000,
+      },
+      { retries: 3, baseDelayMs: 1500 }
     );
 
     if (!statsResp.data || !statsResp.data.hits) {
@@ -150,7 +210,7 @@ async function processCampaignCredits(campaign) {
         const createdDate = campaign.createdAt
           ? campaign.createdAt.toISOString().split("T")[0]
           : fromDate;
-        const totalStatsResp = await axios.post(
+        const totalStatsResp = await postWithRetry(
           "https://v2.sparktraffic.com/get-website-traffic-project-stats",
           null,
           {
@@ -163,7 +223,9 @@ async function processCampaignCredits(campaign) {
               from: createdDate,
               to: currentDate,
             },
-          }
+            timeout: 20000,
+          },
+          { retries: 3, baseDelayMs: 1500 }
         );
 
         let totalHitsEver = 0;
@@ -205,7 +267,7 @@ async function processCampaignCredits(campaign) {
         ? campaign.createdAt.toISOString().split("T")[0]
         : fromDate;
       try {
-        const totalStatsResp = await axios.post(
+        const totalStatsResp = await postWithRetry(
           "https://v2.sparktraffic.com/get-website-traffic-project-stats",
           null,
           {
@@ -218,7 +280,9 @@ async function processCampaignCredits(campaign) {
               from: createdDate,
               to: currentDate,
             },
-          }
+            timeout: 20000,
+          },
+          { retries: 3, baseDelayMs: 1500 }
         );
 
         let totalHitsEver = 0;
@@ -274,7 +338,7 @@ async function processCampaignCredits(campaign) {
             const axios = require("axios");
             const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
 
-            await axios.post(
+            await postWithRetry(
               "https://v2.sparktraffic.com/modify-website-traffic-project",
               {
                 unique_id: campaign.spark_traffic_project_id,
@@ -285,7 +349,9 @@ async function processCampaignCredits(campaign) {
                   "Content-Type": "application/json",
                   API_KEY,
                 },
-              }
+                timeout: 15000,
+              },
+              { retries: 2, baseDelayMs: 1000 }
             );
 
             logger.info("Campaign paused due to insufficient credits", {
@@ -340,7 +406,7 @@ async function processCampaignCredits(campaign) {
         // Pause the campaign at SparkTraffic API level
         if (campaign.spark_traffic_project_id) {
           try {
-            await axios.post(
+            await postWithRetry(
               "https://v2.sparktraffic.com/modify-website-traffic-project",
               {
                 unique_id: campaign.spark_traffic_project_id,
@@ -351,7 +417,9 @@ async function processCampaignCredits(campaign) {
                   "Content-Type": "application/json",
                   API_KEY,
                 },
-              }
+                timeout: 15000,
+              },
+              { retries: 2, baseDelayMs: 1000 }
             );
 
             logger.info("Campaign paused due to negative credits", {

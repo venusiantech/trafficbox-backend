@@ -6,9 +6,9 @@ const { processAllCampaignCredits } = require("../services/creditDeduction");
 const logger = require("../utils/logger");
 
 module.exports = function () {
-  // Credit deduction job - runs every 5 seconds
+  // Credit deduction job - default every 5 minutes (env overridable)
   const creditDeductionExpression =
-    process.env.CREDIT_DEDUCTION_CRON || "*/5 * * * * *"; // Every 5 seconds
+    process.env.CREDIT_DEDUCTION_CRON || "*/1 * * * *"; // Every 5 minutes
   cron.schedule(creditDeductionExpression, async () => {
     try {
       const result = await processAllCampaignCredits();

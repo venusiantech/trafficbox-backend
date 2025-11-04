@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const dotenv = require("dotenv");
 const cors = require("cors");
 const { specs, swaggerUi } = require("./swagger/swagger");
+const compression = require("compression");
 
 dotenv.config();
 const app = express();
@@ -10,6 +11,14 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+// Enable gzip/brotli compression for API responses (threshold 1KB)
+app.use(
+  compression({
+    threshold: 1024,
+    // Let node-compression pick brotli if supported
+    brotli: { enabled: true, zlib: {} },
+  })
+);
 
 // Connect DB
 mongoose
@@ -77,8 +86,9 @@ const logger = require("./utils/logger");
 // Initialize Alpha traffic tracking system
 (async () => {
   try {
-    // Start the data collector with 60-second intervals
-    await alphaTrafficDataCollector.start(60000);
+    // Allow env override; default to 5 minutes to reduce egress
+    const intervalMs = parseInt(process.env.ALPHA_COLLECTOR_INTERVAL_MS || "60000", 10);
+    await alphaTrafficDataCollector.start(intervalMs);
     logger.info("Alpha traffic data collector started successfully");
   } catch (error) {
     logger.error("Failed to start Alpha traffic data collector", {

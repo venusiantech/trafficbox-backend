@@ -62,10 +62,13 @@ class AlphaTrafficDataCollector {
     try {
       logger.debug("Starting Alpha traffic data collection for all campaigns");
 
-      // Get all active Alpha campaigns (SparkTraffic only)
+      // Get all ACTIVE Alpha campaigns (SparkTraffic only)
       const campaigns = await Campaign.find({
+        // Not archived
         is_archived: { $ne: true },
-        state: { $nin: ["archived", "deleted"] },
+        // Only active lifecycle states
+        state: { $in: ["created", "ok", "running"] },
+        // Must be SparkTraffic campaign
         spark_traffic_project_id: { $exists: true, $ne: null },
       }).select("_id title spark_traffic_project_id state createdAt");
 

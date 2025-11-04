@@ -34,11 +34,35 @@ router.get("/campaigns/:id/alpha-traffic/current", auth(), async (req, res) => {
         req.params.id
       );
 
+    // Optional compact mode to reduce payload size
+    const compact = req.query.compact === "true";
+    const payloadMetrics = compact
+      ? Object.fromEntries(
+          Object.entries(metrics).map(([k, v]) => [
+            k,
+            {
+              label: v.label,
+              totalHits: v.totalHits,
+              totalVisits: v.totalVisits,
+              avgSpeed: v.avgSpeed,
+              maxSpeed: v.maxSpeed,
+              lastUpdated: v.lastUpdated,
+              dataPointsCount: v.dataPointsCount,
+              completionPercentage: v.completionPercentage,
+              dataQuality: v.dataQuality,
+            },
+          ])
+        )
+      : metrics;
+
+    // Short-lived caching for dashboards
+    res.setHeader("Cache-Control", "public, max-age=15");
+
     res.json({
       ok: true,
       campaignId: req.params.id,
       sparkTrafficProjectId: campaign.spark_traffic_project_id,
-      currentMetrics: metrics,
+      currentMetrics: payloadMetrics,
       availableTimeRanges: AlphaTrafficSummary.getTimeRanges(),
     });
   } catch (error) {
