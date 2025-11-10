@@ -1,10 +1,10 @@
 const express = require("express");
-const auth = require("../middleware/auth");
+const { requireRole } = require("../middleware/auth");
 const User = require("../models/User");
 const router = express.Router();
 
 // Get logged-in user's basic info, credits, and available hits
-router.get("/", auth(), async (req, res) => {
+router.get("/", requireRole(), async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -28,7 +28,7 @@ router.get("/", auth(), async (req, res) => {
 });
 
 // Logout endpoint (stateless JWT)
-router.post("/logout", auth(), (req, res) => {
+router.post("/logout", requireRole(), (req, res) => {
   // For JWT, logout is handled on the client by deleting the token.
   // Optionally, you can implement token blacklisting for advanced security.
   res.json({ message: "Logged out. Please delete your token on the client." });

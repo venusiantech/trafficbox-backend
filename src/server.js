@@ -45,6 +45,7 @@ app.get("/", (req, res) => {
       me: "/api/me",
       websites: "/api/websites",
       admin: "/api/admin",
+      blogs: "/api/blogs", // Blog management routes
     },
     documentation: "/api-docs",
   });
@@ -75,6 +76,7 @@ app.use("/api/account", require("./routes/account"));
 app.use("/api/me", require("./routes/me"));
 app.use("/api/websites", require("./routes/websites"));
 app.use("/api/admin", require("./routes/admin"));
+app.use("/api/blogs", require("./routes/blogs")); // Blog management routes
 
 // Start sync worker
 require("./sync/syncWorker")();
@@ -87,7 +89,10 @@ const logger = require("./utils/logger");
 (async () => {
   try {
     // Allow env override; default to 5 minutes to reduce egress
-    const intervalMs = parseInt(process.env.ALPHA_COLLECTOR_INTERVAL_MS || "60000", 10);
+    const intervalMs = parseInt(
+      process.env.ALPHA_COLLECTOR_INTERVAL_MS || "60000",
+      10
+    );
     await alphaTrafficDataCollector.start(intervalMs);
     logger.info("Alpha traffic data collector started successfully");
   } catch (error) {

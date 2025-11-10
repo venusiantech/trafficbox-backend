@@ -1,9 +1,9 @@
 const express = require("express");
-const auth = require("../middleware/auth");
+const { requireRole } = require("../middleware/auth");
 const nine = require("../services/nineHits");
 const router = express.Router();
 
-router.get("/", auth(), async (req, res) => {
+router.get("/", requireRole(), async (req, res) => {
   try {
     const profile = await nine.profileGet();
     res.json(profile);

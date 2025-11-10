@@ -1,5 +1,5 @@
 const express = require("express");
-const auth = require("../middleware/auth");
+const { requireRole } = require("../middleware/auth");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
 const vendors = require("../services/vendors");
@@ -180,7 +180,7 @@ function createCleanCampaignResponse(
 }
 
 // Create campaign -> siteAdd
-router.post("/", auth(), async (req, res) => {
+router.post("/", requireRole(), async (req, res) => {
   logger.campaign("Campaign creation started", {
     userId: req.user.id,
     vendor: req.body.vendor || "sparkTraffic",
@@ -499,7 +499,7 @@ router.post("/", auth(), async (req, res) => {
 });
 
 // Get all campaigns for authenticated user
-router.get("/", auth(), async (req, res) => {
+router.get("/", requireRole(), async (req, res) => {
   try {
     const userId = req.user.id;
     const page = parseInt(req.query.page) || 1;
@@ -610,7 +610,7 @@ router.get("/", auth(), async (req, res) => {
 });
 
 // Get user stats (credits and available hits) - MUST BE BEFORE /:id route
-router.get("/user/stats", auth(), async (req, res) => {
+router.get("/user/stats", requireRole(), async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
       "credits availableHits email firstName lastName"
@@ -642,7 +642,7 @@ router.get("/user/stats", auth(), async (req, res) => {
 });
 
 // Get archived campaigns - MUST BE BEFORE /:id route
-router.get("/archived", auth(), async (req, res) => {
+router.get("/archived", requireRole(), async (req, res) => {
   try {
     const archivedCampaigns = await Campaign.find({
       user: req.user.id,
@@ -670,7 +670,7 @@ router.get("/archived", auth(), async (req, res) => {
 });
 
 // Get campaign
-router.get("/:id", auth(), async (req, res) => {
+router.get("/:id", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -872,7 +872,7 @@ router.get("/:id", auth(), async (req, res) => {
 });
 
 // Pause campaign
-router.post("/:id/pause", auth(), async (req, res) => {
+router.post("/:id/pause", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -1001,7 +1001,7 @@ router.post("/:id/pause", auth(), async (req, res) => {
 });
 
 // Resume campaign
-router.post("/:id/resume", auth(), async (req, res) => {
+router.post("/:id/resume", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -1133,7 +1133,7 @@ router.post("/:id/resume", auth(), async (req, res) => {
 });
 
 // Update campaign (POST method following SparkTraffic documentation)
-router.post("/:id/modify", auth(), async (req, res) => {
+router.post("/:id/modify", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -1372,7 +1372,7 @@ router.post("/:id/modify", auth(), async (req, res) => {
 });
 
 // Archive campaign (soft delete)
-router.delete("/:id", auth(), async (req, res) => {
+router.delete("/:id", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -1498,7 +1498,7 @@ router.delete("/:id", auth(), async (req, res) => {
 });
 
 // Restore archived campaign
-router.post("/:id/restore", auth(), async (req, res) => {
+router.post("/:id/restore", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -1558,7 +1558,7 @@ router.post("/:id/restore", auth(), async (req, res) => {
 });
 
 // Get campaign statistics (daily hits and visits report)
-router.get("/:id/stats", auth(), async (req, res) => {
+router.get("/:id/stats", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -1701,7 +1701,7 @@ router.get("/:id/stats", auth(), async (req, res) => {
 });
 
 // Add credits to user (admin only)
-router.post("/user/:userId/add-credits", auth("admin"), async (req, res) => {
+router.post("/user/:userId/add-credits", requireRole("admin"), async (req, res) => {
   try {
     const { credits } = req.body;
     if (!credits || credits <= 0) {
@@ -1760,7 +1760,7 @@ router.post("/user/:userId/add-credits", auth("admin"), async (req, res) => {
 });
 
 // Manual credit deduction for specific campaign (admin only)
-router.post("/:id/process-credits", auth("admin"), async (req, res) => {
+router.post("/:id/process-credits", requireRole("admin"), async (req, res) => {
   try {
     const result = await processSingleCampaignCredits(req.params.id);
 
@@ -1787,7 +1787,7 @@ router.post("/:id/process-credits", auth("admin"), async (req, res) => {
 });
 
 // Test credit deduction for specific campaign (owner or admin)
-router.post("/:id/test-credits", auth(), async (req, res) => {
+router.post("/:id/test-credits", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id).populate(
       "user",
@@ -1892,7 +1892,7 @@ router.post("/:id/test-credits", auth(), async (req, res) => {
 });
 
 // Debug endpoint to show campaign credit state without processing (owner or admin)
-router.get("/:id/credit-debug", auth(), async (req, res) => {
+router.get("/:id/credit-debug", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id).populate(
       "user",
@@ -2023,7 +2023,7 @@ router.get("/:id/credit-debug", auth(), async (req, res) => {
 });
 
 // Process all campaigns credits (admin only)
-router.post("/admin/process-all-credits", auth("admin"), async (req, res) => {
+router.post("/admin/process-all-credits", requireRole("admin"), async (req, res) => {
   try {
     const result = await processAllCampaignCredits();
 
@@ -2048,7 +2048,7 @@ router.post("/admin/process-all-credits", auth("admin"), async (req, res) => {
 });
 
 // Toggle credit deduction for a campaign
-router.post("/:id/toggle-credit-deduction", auth(), async (req, res) => {
+router.post("/:id/toggle-credit-deduction", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -2101,7 +2101,7 @@ router.post("/:id/toggle-credit-deduction", auth(), async (req, res) => {
 });
 
 // Reset campaign hit counter (owner or admin) - for debugging
-router.post("/:id/reset-hit-counter", auth(), async (req, res) => {
+router.post("/:id/reset-hit-counter", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -2194,7 +2194,7 @@ router.post("/:id/reset-hit-counter", auth(), async (req, res) => {
 });
 
 // Reset campaign counters (both hits and visits) - for debugging inflated counts
-router.post("/:id/reset-counters", auth(), async (req, res) => {
+router.post("/:id/reset-counters", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -2311,7 +2311,7 @@ router.post("/:id/reset-counters", auth(), async (req, res) => {
 });
 
 // Migrate existing campaigns to new geo format (admin only)
-router.post("/admin/migrate-geo-format", auth("admin"), async (req, res) => {
+router.post("/admin/migrate-geo-format", requireRole("admin"), async (req, res) => {
   try {
     const campaigns = await Campaign.find({
       countries: { $exists: true, $not: { $size: 0 } },
@@ -2395,7 +2395,7 @@ router.post("/admin/migrate-geo-format", auth("admin"), async (req, res) => {
 });
 
 // Generate PDF report for campaign
-router.get("/:id/report.pdf", auth(), async (req, res) => {
+router.get("/:id/report.pdf", requireRole(), async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.id);
     if (!campaign) {

@@ -1,5 +1,5 @@
 const express = require("express");
-const auth = require("../middleware/auth");
+const { requireRole } = require("../middleware/auth");
 const alphaTrafficTrackingService = require("../services/alphaTrafficTrackingService");
 const alphaTrafficDataCollector = require("../services/alphaTrafficDataCollector");
 const Campaign = require("../models/Campaign");
@@ -10,7 +10,7 @@ const logger = require("../utils/logger");
 const router = express.Router();
 
 // Get current Alpha traffic metrics for a campaign
-router.get("/campaigns/:id/alpha-traffic/current", auth(), async (req, res) => {
+router.get("/campaigns/:id/alpha-traffic/current", requireRole(), async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.id);
     if (!campaign) {
@@ -76,7 +76,7 @@ router.get("/campaigns/:id/alpha-traffic/current", auth(), async (req, res) => {
 });
 
 // Get Alpha traffic summary for a specific time range
-router.get("/campaigns/:id/alpha-traffic/summary", auth(), async (req, res) => {
+router.get("/campaigns/:id/alpha-traffic/summary", requireRole(), async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.id);
     if (!campaign) {
@@ -134,7 +134,7 @@ router.get("/campaigns/:id/alpha-traffic/summary", auth(), async (req, res) => {
 });
 
 // Get Alpha traffic trends analysis
-router.get("/campaigns/:id/alpha-traffic/trends", auth(), async (req, res) => {
+router.get("/campaigns/:id/alpha-traffic/trends", requireRole(), async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.id);
     if (!campaign) {
@@ -191,7 +191,7 @@ router.get("/campaigns/:id/alpha-traffic/trends", auth(), async (req, res) => {
 });
 
 // Get raw Alpha traffic data for a campaign
-router.get("/campaigns/:id/alpha-traffic/raw", auth(), async (req, res) => {
+router.get("/campaigns/:id/alpha-traffic/raw", requireRole(), async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.id);
     if (!campaign) {
@@ -278,7 +278,7 @@ router.get("/campaigns/:id/alpha-traffic/raw", auth(), async (req, res) => {
 // Manually trigger Alpha traffic data collection for a campaign
 router.post(
   "/campaigns/:id/alpha-traffic/collect",
-  auth(),
+  requireRole(),
   async (req, res) => {
     try {
       const campaign = await Campaign.findById(req.params.id);
@@ -327,7 +327,7 @@ router.post(
 // Initialize Alpha traffic tracking for a campaign
 router.post(
   "/campaigns/:id/alpha-traffic/initialize",
-  auth(),
+  requireRole(),
   async (req, res) => {
     try {
       const campaign = await Campaign.findById(req.params.id);
@@ -375,7 +375,7 @@ router.post(
 // Get Alpha traffic data collector status (admin only)
 router.get(
   "/admin/alpha-traffic/collector/status",
-  auth("admin"),
+  requireRole("admin"),
   async (req, res) => {
     try {
       const status = alphaTrafficDataCollector.getStatus();
@@ -396,7 +396,7 @@ router.get(
 // Start Alpha traffic data collector (admin only)
 router.post(
   "/admin/alpha-traffic/collector/start",
-  auth("admin"),
+  requireRole("admin"),
   async (req, res) => {
     try {
       const intervalMs = parseInt(req.body.intervalMs) || 60000; // Default 1 minute
@@ -420,7 +420,7 @@ router.post(
 // Stop Alpha traffic data collector (admin only)
 router.post(
   "/admin/alpha-traffic/collector/stop",
-  auth("admin"),
+  requireRole("admin"),
   async (req, res) => {
     try {
       alphaTrafficDataCollector.stop();
@@ -443,7 +443,7 @@ router.post(
 // Update Alpha traffic data collector interval (admin only)
 router.put(
   "/admin/alpha-traffic/collector/interval",
-  auth("admin"),
+  requireRole("admin"),
   async (req, res) => {
     try {
       const intervalMs = parseInt(req.body.intervalMs);
@@ -474,7 +474,7 @@ router.put(
 // Update Alpha traffic data collector configuration (admin only)
 router.put(
   "/admin/alpha-traffic/collector/config",
-  auth("admin"),
+  requireRole("admin"),
   async (req, res) => {
     try {
       const config = {
@@ -503,7 +503,7 @@ router.put(
 // Trigger collection for all Alpha campaigns (admin only)
 router.post(
   "/admin/alpha-traffic/collect-all",
-  auth("admin"),
+  requireRole("admin"),
   async (req, res) => {
     try {
       const result =
@@ -525,7 +525,7 @@ router.post(
 );
 
 // Cleanup old Alpha traffic data (admin only)
-router.post("/admin/alpha-traffic/cleanup", auth("admin"), async (req, res) => {
+router.post("/admin/alpha-traffic/cleanup", requireRole("admin"), async (req, res) => {
   try {
     const retentionDays = parseInt(req.body.retentionDays) || 90;
 
@@ -557,7 +557,7 @@ router.post("/admin/alpha-traffic/cleanup", auth("admin"), async (req, res) => {
 // Get system-wide Alpha traffic statistics (admin only)
 router.get(
   "/admin/alpha-traffic/statistics",
-  auth("admin"),
+  requireRole("admin"),
   async (req, res) => {
     try {
       const [
@@ -632,7 +632,7 @@ router.get(
 );
 
 // Get available Alpha time ranges
-router.get("/alpha-traffic/time-ranges", auth(), async (req, res) => {
+router.get("/alpha-traffic/time-ranges", requireRole(), async (req, res) => {
   try {
     const timeRanges = AlphaTrafficSummary.getTimeRanges();
     res.json({

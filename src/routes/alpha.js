@@ -1,5 +1,5 @@
 const express = require("express");
-const auth = require("../middleware/auth");
+const { requireRole } = require("../middleware/auth");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
 const vendors = require("../services/vendors");
@@ -227,7 +227,7 @@ function createCleanCampaignResponse(
 }
 
 // Create Alpha campaign (SparkTraffic only)
-router.post("/campaigns", auth(), async (req, res) => {
+router.post("/campaigns", requireRole(), async (req, res) => {
   logger.campaign("Alpha campaign creation started", {
     userId: req.user.id,
     vendor: "sparkTraffic",
@@ -546,7 +546,7 @@ router.post("/campaigns", auth(), async (req, res) => {
 });
 
 // Get Alpha campaigns with time range filtering (SparkTraffic only)
-router.get("/campaigns/filter", auth(), async (req, res) => {
+router.get("/campaigns/filter", requireRole(), async (req, res) => {
   try {
     const userId = req.user.id;
     const { timeRange = "7d" } = req.query;
@@ -683,7 +683,7 @@ router.get("/campaigns/filter", auth(), async (req, res) => {
 });
 
 // Get all Alpha campaigns for authenticated user (SparkTraffic only)
-router.get("/campaigns", auth(), async (req, res) => {
+router.get("/campaigns", requireRole(), async (req, res) => {
   try {
     const userId = req.user.id;
     const page = parseInt(req.query.page) || 1;
@@ -789,7 +789,7 @@ router.get("/campaigns", auth(), async (req, res) => {
 });
 
 // Get Alpha campaign by ID
-router.get("/campaigns/:id", auth(), async (req, res) => {
+router.get("/campaigns/:id", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c) {
@@ -954,7 +954,7 @@ router.get("/campaigns/:id", auth(), async (req, res) => {
 });
 
 // Pause Alpha campaign
-router.post("/campaigns/:id/pause", auth(), async (req, res) => {
+router.post("/campaigns/:id/pause", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c || !c.spark_traffic_project_id) {
@@ -1038,7 +1038,7 @@ router.post("/campaigns/:id/pause", auth(), async (req, res) => {
 });
 
 // Resume Alpha campaign
-router.post("/campaigns/:id/resume", auth(), async (req, res) => {
+router.post("/campaigns/:id/resume", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id).populate("user");
     if (!c || !c.spark_traffic_project_id) {
@@ -1137,7 +1137,7 @@ router.post("/campaigns/:id/resume", auth(), async (req, res) => {
 });
 
 // Update Alpha campaign
-router.post("/campaigns/:id/modify", auth(), async (req, res) => {
+router.post("/campaigns/:id/modify", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c || !c.spark_traffic_project_id) {
@@ -1352,7 +1352,7 @@ router.post("/campaigns/:id/modify", auth(), async (req, res) => {
 });
 
 // Archive Alpha campaign
-router.delete("/campaigns/:id", auth(), async (req, res) => {
+router.delete("/campaigns/:id", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c || !c.spark_traffic_project_id) {
@@ -1448,7 +1448,7 @@ router.delete("/campaigns/:id", auth(), async (req, res) => {
 });
 
 // Get Alpha campaign statistics
-router.get("/campaigns/:id/stats", auth(), async (req, res) => {
+router.get("/campaigns/:id/stats", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id);
     if (!c || !c.spark_traffic_project_id) {
@@ -1563,7 +1563,7 @@ router.get("/campaigns/:id/stats", auth(), async (req, res) => {
 });
 
 // Generate PDF report for Alpha campaign
-router.get("/campaigns/:id/report.pdf", auth(), async (req, res) => {
+router.get("/campaigns/:id/report.pdf", requireRole(), async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.id);
     if (!campaign || !campaign.spark_traffic_project_id) {
@@ -1641,7 +1641,7 @@ router.get("/campaigns/:id/report.pdf", auth(), async (req, res) => {
 });
 
 // Get user's credit status and paused campaigns
-router.get("/credit-status", auth(), async (req, res) => {
+router.get("/credit-status", requireRole(), async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
     if (!user) {

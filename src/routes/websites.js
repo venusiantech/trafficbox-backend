@@ -1,10 +1,10 @@
 const express = require("express");
-const auth = require("../middleware/auth");
+const { requireRole } = require("../middleware/auth");
 const Website = require("../models/Website");
 const router = express.Router();
 
 // Add a new website for the logged-in user
-router.post("/", auth(), async (req, res) => {
+router.post("/", requireRole(), async (req, res) => {
   try {
     const { url, title, description, metadata } = req.body;
     if (!url) return res.status(400).json({ error: "url is required" });
@@ -23,7 +23,7 @@ router.post("/", auth(), async (req, res) => {
 });
 
 // Get all websites for the logged-in user
-router.get("/", auth(), async (req, res) => {
+router.get("/", requireRole(), async (req, res) => {
   try {
     const websites = await Website.find({ user: req.user.id });
     res.json({ websites });

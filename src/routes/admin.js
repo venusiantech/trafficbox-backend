@@ -1,12 +1,12 @@
 const express = require("express");
-const auth = require("../middleware/auth");
+const { requireRole } = require("../middleware/auth");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
 
 const router = express.Router();
 
 // Admin Dashboard - Overview Stats
-router.get("/dashboard", auth("admin"), async (req, res) => {
+router.get("/dashboard", requireRole("admin"), async (req, res) => {
   try {
     const [
       totalUsers,
@@ -69,7 +69,7 @@ router.get("/dashboard", auth("admin"), async (req, res) => {
 });
 
 // Get All Users with Details
-router.get("/users", auth("admin"), async (req, res) => {
+router.get("/users", requireRole("admin"), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
@@ -119,7 +119,7 @@ router.get("/users", auth("admin"), async (req, res) => {
 });
 
 // Get All Campaigns with Details
-router.get("/campaigns", auth("admin"), async (req, res) => {
+router.get("/campaigns", requireRole("admin"), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
@@ -161,7 +161,7 @@ router.get("/campaigns", auth("admin"), async (req, res) => {
 });
 
 // Get User Details with All Campaigns
-router.get("/users/:userId", auth("admin"), async (req, res) => {
+router.get("/users/:userId", requireRole("admin"), async (req, res) => {
   try {
     const user = await User.findById(req.params.userId).select("-password");
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -192,7 +192,7 @@ router.get("/users/:userId", auth("admin"), async (req, res) => {
 });
 
 // Update User Credits/Hits
-router.put("/users/:userId/credits", auth("admin"), async (req, res) => {
+router.put("/users/:userId/credits", requireRole("admin"), async (req, res) => {
   try {
     const { credits, availableHits, action = "set" } = req.body;
 
@@ -248,7 +248,7 @@ router.put("/users/:userId/credits", auth("admin"), async (req, res) => {
 // Force Pause/Resume Campaign
 router.post(
   "/campaigns/:campaignId/:action",
-  auth("admin"),
+  requireRole("admin"),
   async (req, res) => {
     try {
       const { campaignId, action } = req.params;
@@ -331,7 +331,7 @@ router.post(
 );
 
 // Delete Campaign (Admin Override)
-router.delete("/campaigns/:campaignId", auth("admin"), async (req, res) => {
+router.delete("/campaigns/:campaignId", requireRole("admin"), async (req, res) => {
   try {
     const campaign = await Campaign.findById(req.params.campaignId).populate(
       "user",
@@ -366,7 +366,7 @@ router.delete("/campaigns/:campaignId", auth("admin"), async (req, res) => {
 });
 
 // System Analytics
-router.get("/analytics", auth("admin"), async (req, res) => {
+router.get("/analytics", requireRole("admin"), async (req, res) => {
   try {
     const days = parseInt(req.query.days) || 30;
     const startDate = new Date();
@@ -463,7 +463,7 @@ router.get("/analytics", auth("admin"), async (req, res) => {
 });
 
 // Search Users and Campaigns
-router.get("/search", auth("admin"), async (req, res) => {
+router.get("/search", requireRole("admin"), async (req, res) => {
   try {
     const { q, type = "all" } = req.query;
     if (!q) return res.status(400).json({ error: "Search query required" });
@@ -505,7 +505,7 @@ router.get("/search", auth("admin"), async (req, res) => {
 });
 
 // Archive Management
-router.get("/archives/stats", auth("admin"), async (req, res) => {
+router.get("/archives/stats", requireRole("admin"), async (req, res) => {
   try {
     const { getArchiveStats } = require("../utils/archiveCleanup");
     const stats = await getArchiveStats();
@@ -520,7 +520,7 @@ router.get("/archives/stats", auth("admin"), async (req, res) => {
 });
 
 // Run cleanup job manually
-router.post("/archives/cleanup", auth("admin"), async (req, res) => {
+router.post("/archives/cleanup", requireRole("admin"), async (req, res) => {
   try {
     const {
       cleanupArchivedCampaigns,
@@ -544,7 +544,7 @@ router.post("/archives/cleanup", auth("admin"), async (req, res) => {
 });
 
 // Get all archived campaigns
-router.get("/archives/campaigns", auth("admin"), async (req, res) => {
+router.get("/archives/campaigns", requireRole("admin"), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;

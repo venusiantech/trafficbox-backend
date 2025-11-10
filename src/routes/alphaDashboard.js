@@ -1,5 +1,5 @@
-﻿const express = require("express");
-const auth = require("../middleware/auth");
+const express = require("express");
+const { requireRole } = require("../middleware/auth");
 const Campaign = require("../models/Campaign");
 const AlphaTrafficData = require("../models/AlphaTrafficData");
 const AlphaTrafficSummary = require("../models/AlphaTrafficSummary");
@@ -9,7 +9,7 @@ const logger = require("../utils/logger");
 const router = express.Router();
 
 // Get Alpha dashboard overview - aggregated data from all user''s Alpha campaigns
-router.get("/overview", auth(), async (req, res) => {
+router.get("/overview", requireRole(), async (req, res) => {
   try {
     const userId = req.user.id;
     const isAdmin = req.user.role === "admin";
