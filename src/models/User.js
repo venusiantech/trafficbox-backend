@@ -23,6 +23,14 @@ userSchema.pre("save", async function (next) {
   next();
 });
 
+// Auto-calculate availableHits when credits change
+userSchema.pre("save", function (next) {
+  if (this.isModified("credits")) {
+    this.availableHits = Math.floor(this.credits / 3);
+  }
+  next();
+});
+
 userSchema.methods.comparePassword = function (candidate) {
   return bcrypt.compare(candidate, this.password);
 };

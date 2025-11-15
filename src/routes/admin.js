@@ -575,4 +575,34 @@ router.get("/archives/campaigns", requireRole("admin"), async (req, res) => {
   }
 });
 
+// Fix all users' availableHits calculation
+router.post("/fix-user-hits", requireRole("admin"), async (req, res) => {
+  try {
+    const users = await User.find({});
+    let fixedCount = 0;
+
+    for (const user of users) {
+      const correctHits = Math.floor(user.credits / 3);
+      if (user.availableHits !== correctHits) {
+        await User.findByIdAndUpdate(user._id, {
+          availableHits: correctHits,
+        });
+        fixedCount++;
+      }
+    }
+
+    res.json({
+      status: "success",
+      message: `Fixed availableHits for ${fixedCount} users`,
+      totalUsers: users.length,
+      fixedUsers: fixedCount,
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: "error",
+      message: error.message,
+    });
+  }
+});
+
 module.exports = router;
