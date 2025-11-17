@@ -63,6 +63,14 @@ const campaignSchema = new mongoose.Schema(
     total_hits_counted: { type: Number, default: 0 }, // Total hits we've already counted for credit deduction
     total_visits_counted: { type: Number, default: 0 }, // Total visits we've already counted
     credit_deduction_enabled: { type: Boolean, default: true }, // Enable/disable automatic credit deduction
+    transfer_history: [{
+      from_user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      to_user: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      transferred_by: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      transferred_at: { type: Date, default: Date.now },
+      reason: { type: String, default: "Admin transfer" },
+      admin_email: { type: String }
+    }],
     metadata: { type: mongoose.Schema.Types.Mixed },
   },
   { timestamps: true }
