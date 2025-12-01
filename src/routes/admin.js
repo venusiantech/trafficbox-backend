@@ -194,7 +194,24 @@ router.get("/users/:userId", requireRole("admin"), async (req, res) => {
 // Update User Credits/Hits
 router.put("/users/:userId/credits", requireRole("admin"), async (req, res) => {
   try {
-    const { credits, availableHits, action = "set" } = req.body;
+    // Support both 'credits'/'amount' and 'action' parameters
+    const credits = req.body.credits || req.body.amount;
+    const action = req.body.action || "set";
+
+    // Validate input
+    if (credits === undefined || credits === null) {
+      return res.status(400).json({ 
+        error: "Credits or amount is required",
+        example: { "amount": 1000, "action": "add" }
+      });
+    }
+
+    if (!["add", "subtract", "set"].includes(action)) {
+      return res.status(400).json({ 
+        error: "Action must be 'add', 'subtract', or 'set'",
+        receivedAction: action
+      });
+    }
 
     const user = await User.findById(req.params.userId);
     if (!user) return res.status(404).json({ error: "User not found" });
@@ -202,19 +219,18 @@ router.put("/users/:userId/credits", requireRole("admin"), async (req, res) => {
     const oldCredits = user.credits;
     const oldHits = user.availableHits;
 
+    // Update credits based on action
     if (action === "add") {
-      if (credits) user.credits += credits;
-      if (availableHits) user.availableHits += availableHits;
+      user.credits += credits;
     } else if (action === "subtract") {
-      if (credits) user.credits = Math.max(0, user.credits - credits);
-      if (availableHits)
-        user.availableHits = Math.max(0, user.availableHits - availableHits);
+      user.credits = Math.max(0, user.credits - credits);
     } else {
       // set
-      if (credits !== undefined) user.credits = Math.max(0, credits);
-      if (availableHits !== undefined)
-        user.availableHits = Math.max(0, availableHits);
+      user.credits = Math.max(0, credits);
     }
+
+    // Auto-calculate availableHits from credits (3 credits = 1 hit)
+    user.availableHits = Math.floor(user.credits / 3);
 
     await user.save();
 
