@@ -26,7 +26,7 @@ router.get("/overview", requireRole(), async (req, res) => {
     }
 
     const alphaCampaigns = await Campaign.find(campaignQuery).select(
-      "_id title spark_traffic_project_id user state countries spark_traffic_data"
+      "_id title spark_traffic_project_id user state countries spark_traffic_data total_hits_counted total_visits_counted"
     );
     const campaignIds = alphaCampaigns.map((c) => c._id);
 
@@ -109,15 +109,20 @@ router.get("/overview", requireRole(), async (req, res) => {
 
       const isActiveCampaign = userFriendlyStatus === "active";
 
-      // Use the 1h metrics as the primary source for totals (matching existing behavior)
+      // Use the 1h metrics for speed/bounce rate, but use campaign totals for hits/visits/views
       const primaryMetrics = currentMetrics["1h"] || {};
+
+      // Get all-time totals from the campaign model
+      const campaignTotalHits = campaign.total_hits_counted || 0;
+      const campaignTotalVisits = campaign.total_visits_counted || 0;
+      const campaignTotalViews = campaign.total_visits_counted || 0; // Views = Visits for Alpha
 
       // Only count metrics for active campaigns
       if (isActiveCampaign) {
-        totalHits += primaryMetrics.totalHits || 0;
-        totalVisits += primaryMetrics.totalVisits || 0;
-        totalViews += primaryMetrics.totalViews || 0;
-        uniqueVisitors += primaryMetrics.uniqueVisitors || 0;
+        totalHits += campaignTotalHits;
+        totalVisits += campaignTotalVisits;
+        totalViews += campaignTotalViews;
+        uniqueVisitors += primaryMetrics.uniqueVisitors || 0; // Keep this from 1h as it's a calculated metric
 
         if (primaryMetrics.avgSpeed > 0) {
           speedSum += primaryMetrics.avgSpeed;
@@ -219,9 +224,9 @@ router.get("/overview", requireRole(), async (req, res) => {
         campaignId: campaign._id,
         title: campaign.title,
         projectId: campaign.spark_traffic_project_id,
-        hits: primaryMetrics.totalHits || 0,
-        visits: primaryMetrics.totalVisits || 0,
-        views: primaryMetrics.totalViews || 0,
+        hits: campaignTotalHits,
+        visits: campaignTotalVisits,
+        views: campaignTotalViews,
         uniqueVisitors: primaryMetrics.uniqueVisitors || 0,
         speed: primaryMetrics.avgSpeed || 0,
         lastUpdated: primaryMetrics.lastUpdated,
