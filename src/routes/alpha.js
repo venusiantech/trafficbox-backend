@@ -682,6 +682,40 @@ router.get("/campaigns/filter", requireRole(), async (req, res) => {
   }
 });
 
+// Get archived Alpha campaigns - MUST BE BEFORE /:id route
+router.get("/campaigns/archived", requireRole(), async (req, res) => {
+  try {
+    const archivedCampaigns = await Campaign.find({
+      user: req.user.id,
+      spark_traffic_project_id: { $exists: true, $ne: null },
+      is_archived: true,
+    }).sort({ archived_at: -1 });
+
+    // Clean up archived campaign data
+    const cleanArchivedCampaigns = archivedCampaigns.map((campaign) =>
+      createCleanCampaignResponse(campaign)
+    );
+
+    logger.campaign("Archived Alpha campaigns retrieved", {
+      userId: req.user.id,
+      count: cleanArchivedCampaigns.length,
+    });
+
+    res.json({
+      ok: true,
+      campaigns: cleanArchivedCampaigns,
+      count: cleanArchivedCampaigns.length,
+    });
+  } catch (err) {
+    logger.error("Get archived Alpha campaigns failed", {
+      userId: req.user.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get all Alpha campaigns for authenticated user (SparkTraffic only)
 router.get("/campaigns", requireRole(), async (req, res) => {
   try {
