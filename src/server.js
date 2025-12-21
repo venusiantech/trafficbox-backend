@@ -11,6 +11,22 @@ const app = express();
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// Set timeout for all requests to 6 minutes (slightly longer than AI timeout)
+app.use((req, res, next) => {
+  // Set timeout for AI blog generation endpoints
+  if (req.path.includes('/ai/research-blog-writer')) {
+    req.setTimeout(360000); // 6 minutes for blog generation
+    res.setTimeout(360000);
+  } else if (req.path.includes('/ai/')) {
+    req.setTimeout(180000); // 3 minutes for other AI endpoints
+    res.setTimeout(180000);
+  } else {
+    req.setTimeout(30000); // 30 seconds for regular endpoints
+    res.setTimeout(30000);
+  }
+  next();
+});
 // Enable gzip/brotli compression for API responses (threshold 1KB)
 app.use(
   compression({

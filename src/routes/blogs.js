@@ -264,12 +264,24 @@ router.post("/ai/article-title", authenticateJWT, requireAdmin, async (req, res)
     const response = await axios.post(
       `${API_BASE}/api/ai/article-title`,
       { quantity: 1, hint, topic },
-      { headers: { Authorization: `Bearer ${API_KEY}` } }
+      { 
+        headers: { Authorization: `Bearer ${API_KEY}` },
+        timeout: 60000 // 1 minute timeout for title generation
+      }
     );
 
     res.json({ status: "success", data: response.data });
   } catch (error) {
     logger.error("AI article-title generation failed", { error: error.message });
+    
+    // Handle timeout errors specifically
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      return res.status(408).json({ 
+        status: "error", 
+        error: { message: "Request timeout - AI title generation is taking longer than expected. Please try again." }
+      });
+    }
+    
     const message = error.response?.data || { message: error.message };
     res.status(error.response?.status || 500).json({ status: "error", error: message });
   }
@@ -297,15 +309,28 @@ router.post("/ai/research-blog-writer", authenticateJWT, requireAdmin, async (re
       topic,
     };
 
+    // Set timeout to 5 minutes (300 seconds) for AI blog generation
     const response = await axios.post(
       `${API_BASE}/api/ai/research-blog-writer`,
       payload,
-      { headers: { Authorization: `Bearer ${API_KEY}` } }
+      { 
+        headers: { Authorization: `Bearer ${API_KEY}` },
+        timeout: 300000 // 5 minutes timeout
+      }
     );
 
     res.json({ status: "success", data: response.data });
   } catch (error) {
     logger.error("AI research-blog-writer failed", { error: error.message });
+    
+    // Handle timeout errors specifically
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      return res.status(408).json({ 
+        status: "error", 
+        error: { message: "Request timeout - AI blog generation is taking longer than expected. Please try again." }
+      });
+    }
+    
     const message = error.response?.data || { message: error.message };
     res.status(error.response?.status || 500).json({ status: "error", error: message });
   }
@@ -330,12 +355,24 @@ router.post("/ai/image-generation", authenticateJWT, requireAdmin, async (req, r
     const response = await axios.post(
       `${API_BASE}/api/ai/image-generation`,
       { prompt },
-      { headers: { Authorization: `Bearer ${API_KEY}` } }
+      { 
+        headers: { Authorization: `Bearer ${API_KEY}` },
+        timeout: 120000 // 2 minutes timeout for image generation
+      }
     );
 
     res.json({ status: "success", data: response.data });
   } catch (error) {
     logger.error("AI image-generation failed", { error: error.message });
+    
+    // Handle timeout errors specifically
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      return res.status(408).json({ 
+        status: "error", 
+        error: { message: "Request timeout - AI image generation is taking longer than expected. Please try again." }
+      });
+    }
+    
     const message = error.response?.data || { message: error.message };
     res.status(error.response?.status || 500).json({ status: "error", error: message });
   }
