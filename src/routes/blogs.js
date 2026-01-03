@@ -248,96 +248,186 @@ router.delete("/:id", authenticateJWT, requireAdmin, async (req, res) => {
 });
 
 // AI: Generate blog title (admin only)
-router.post("/ai/article-title", authenticateJWT, requireAdmin, async (req, res) => {
-  try {
-    const axios = require("axios");
-    const API_BASE = process.env.BLOG_AI_BASE_URL || "https://backend.aaddyy.com";
-    const API_KEY = process.env.BLOG_AI_API_KEY;
+router.post(
+  "/ai/article-title",
+  authenticateJWT,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const axios = require("axios");
+      const API_BASE =
+        process.env.BLOG_AI_BASE_URL || "https://backend.aaddyy.com";
+      const API_KEY = process.env.BLOG_AI_API_KEY;
 
-    if (!API_KEY) {
-      return res.status(400).json({ status: "error", message: "BLOG_AI_API_KEY is not configured" });
+      if (!API_KEY) {
+        return res
+          .status(400)
+          .json({
+            status: "error",
+            message: "BLOG_AI_API_KEY is not configured",
+          });
+      }
+
+      // quantity is hardcoded to 1; optional hint/topic in body
+      const { hint, topic } = req.body || {};
+
+      const response = await axios.post(
+        `${API_BASE}/api/ai/article-title`,
+        { quantity: 1, hint, topic },
+        { headers: { Authorization: `Bearer ${API_KEY}` } }
+      );
+
+      res.json({ status: "success", data: response.data });
+    } catch (error) {
+      logger.error("AI article-title generation failed", {
+        error: error.message,
+      });
+      const message = error.response?.data || { message: error.message };
+      res
+        .status(error.response?.status || 500)
+        .json({ status: "error", error: message });
     }
-
-    // quantity is hardcoded to 1; optional hint/topic in body
-    const { hint, topic } = req.body || {};
-
-    const response = await axios.post(
-      `${API_BASE}/api/ai/article-title`,
-      { quantity: 1, hint, topic },
-      { headers: { Authorization: `Bearer ${API_KEY}` } }
-    );
-
-    res.json({ status: "success", data: response.data });
-  } catch (error) {
-    logger.error("AI article-title generation failed", { error: error.message });
-    const message = error.response?.data || { message: error.message };
-    res.status(error.response?.status || 500).json({ status: "error", error: message });
   }
-});
+);
 
 // AI: Generate researched blog content (admin only)
-router.post("/ai/research-blog-writer", authenticateJWT, requireAdmin, async (req, res) => {
+router.post(
+  "/ai/research-blog-writer",
+  authenticateJWT,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const axios = require("axios");
+      const API_BASE =
+        process.env.BLOG_AI_BASE_URL || "https://backend.aaddyy.com";
+      const API_KEY = process.env.BLOG_AI_API_KEY;
+
+      if (!API_KEY) {
+        return res
+          .status(400)
+          .json({
+            status: "error",
+            message: "BLOG_AI_API_KEY is not configured",
+          });
+      }
+
+      const { topic } = req.body || {};
+      if (!topic) {
+        return res
+          .status(400)
+          .json({ status: "error", message: "topic is required" });
+      }
+
+      const payload = {
+        depth: 1, // fixed from -1 to 1
+        includeResearch: true,
+        topic,
+      };
+
+      const response = await axios.post(
+        `${API_BASE}/api/ai/research-blog-writer`,
+        payload,
+        { headers: { Authorization: `Bearer ${API_KEY}` } }
+      );
+
+      res.json({ status: "success", data: response.data });
+    } catch (error) {
+      logger.error("AI research-blog-writer failed", { error: error.message });
+      const message = error.response?.data || { message: error.message };
+      res
+        .status(error.response?.status || 500)
+        .json({ status: "error", error: message });
+    }
+  }
+);
+
+// AI: Generate blog image (admin only)
+router.post(
+  "/ai/image-generation",
+  authenticateJWT,
+  requireAdmin,
+  async (req, res) => {
+    try {
+      const axios = require("axios");
+      const API_BASE =
+        process.env.BLOG_AI_BASE_URL || "https://backend.aaddyy.com";
+      const API_KEY = process.env.BLOG_AI_API_KEY;
+
+      if (!API_KEY) {
+        return res
+          .status(400)
+          .json({
+            status: "error",
+            message: "BLOG_AI_API_KEY is not configured",
+          });
+      }
+
+      const { prompt } = req.body || {};
+      if (!prompt) {
+        return res
+          .status(400)
+          .json({ status: "error", message: "prompt is required" });
+      }
+
+      const response = await axios.post(
+        `${API_BASE}/api/ai/image-generation`,
+        { prompt },
+        { headers: { Authorization: `Bearer ${API_KEY}` } }
+      );
+
+      res.json({ status: "success", data: response.data });
+    } catch (error) {
+      logger.error("AI image-generation failed", { error: error.message });
+      const message = error.response?.data || { message: error.message };
+      res
+        .status(error.response?.status || 500)
+        .json({ status: "error", error: message });
+    }
+  }
+);
+
+// AI: Generate SEO analysis (authenticated users)
+router.post("/ai/seo-analysis", authenticateJWT, async (req, res) => {
   try {
     const axios = require("axios");
-    const API_BASE = process.env.BLOG_AI_BASE_URL || "https://backend.aaddyy.com";
+    const API_BASE =
+      process.env.BLOG_AI_BASE_URL || "https://backend.aaddyy.com";
     const API_KEY = process.env.BLOG_AI_API_KEY;
 
     if (!API_KEY) {
-      return res.status(400).json({ status: "error", message: "BLOG_AI_API_KEY is not configured" });
+      return res
+        .status(400)
+        .json({
+          status: "error",
+          message: "BLOG_AI_API_KEY is not configured",
+        });
     }
 
-    const { topic } = req.body || {};
-    if (!topic) {
-      return res.status(400).json({ status: "error", message: "topic is required" });
+    const { url, includeBacklinks } = req.body || {};
+    if (!url) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "url is required" });
     }
 
     const payload = {
-      depth: 1, // fixed from -1 to 1
-      includeResearch: true,
-      topic,
+      url,
+      includeBacklinks: includeBacklinks || false,
     };
 
     const response = await axios.post(
-      `${API_BASE}/api/ai/research-blog-writer`,
+      `${API_BASE}/api/ai/seo-analysis`,
       payload,
       { headers: { Authorization: `Bearer ${API_KEY}` } }
     );
 
     res.json({ status: "success", data: response.data });
   } catch (error) {
-    logger.error("AI research-blog-writer failed", { error: error.message });
+    logger.error("AI SEO analysis failed", { error: error.message });
     const message = error.response?.data || { message: error.message };
-    res.status(error.response?.status || 500).json({ status: "error", error: message });
-  }
-});
-
-// AI: Generate blog image (admin only)
-router.post("/ai/image-generation", authenticateJWT, requireAdmin, async (req, res) => {
-  try {
-    const axios = require("axios");
-    const API_BASE = process.env.BLOG_AI_BASE_URL || "https://backend.aaddyy.com";
-    const API_KEY = process.env.BLOG_AI_API_KEY;
-
-    if (!API_KEY) {
-      return res.status(400).json({ status: "error", message: "BLOG_AI_API_KEY is not configured" });
-    }
-
-    const { prompt } = req.body || {};
-    if (!prompt) {
-      return res.status(400).json({ status: "error", message: "prompt is required" });
-    }
-
-    const response = await axios.post(
-      `${API_BASE}/api/ai/image-generation`,
-      { prompt },
-      { headers: { Authorization: `Bearer ${API_KEY}` } }
-    );
-
-    res.json({ status: "success", data: response.data });
-  } catch (error) {
-    logger.error("AI image-generation failed", { error: error.message });
-    const message = error.response?.data || { message: error.message };
-    res.status(error.response?.status || 500).json({ status: "error", error: message });
+    res
+      .status(error.response?.status || 500)
+      .json({ status: "error", error: message });
   }
 });
 
