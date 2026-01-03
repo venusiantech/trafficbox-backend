@@ -283,7 +283,7 @@ router.post(
     const message = error.response?.data || { message: error.message };
     res.status(error.response?.status || 500).json({ status: "error", error: message });
   }
-);
+});
 
 // AI: Generate researched blog content (admin only)
 router.post(
@@ -331,7 +331,7 @@ router.post(
     const message = error.response?.data || { message: error.message };
     res.status(error.response?.status || 500).json({ status: "error", error: message });
   }
-);
+});
 
 // AI: Generate blog image (admin only)
 router.post(
