@@ -12,6 +12,8 @@ const userSchema = new mongoose.Schema(
     cashBalance: { type: Number, default: 0 }, // User's cash balance
     credits: { type: Number, default: 5000 }, // Free credits given to new users
     availableHits: { type: Number, default: 1666 }, // 5000/3 = 1666.67 rounded down
+    // Stripe integration
+    stripeCustomerId: { type: String, index: true }, // Stripe customer ID
     // Add more fields as needed
   },
   { timestamps: true }

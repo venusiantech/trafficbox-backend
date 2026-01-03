@@ -1,5 +1,9 @@
 const express = require("express");
 const { requireRole } = require("../middleware/auth");
+const {
+  checkSubscriptionAccess,
+  checkFeatureAccess,
+} = require("../middleware/subscription");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
 const vendors = require("../services/vendors");
@@ -67,10 +71,11 @@ async function fetchCampaignStats(campaign) {
 
       // Get actual project details to fetch real speed
       let actualSpeed = campaign.state === "paused" ? 0 : 200; // Default fallback
-      
+
       // First try to get speed from stored metadata (faster)
       if (campaign.metadata && campaign.metadata.currentSpeed !== undefined) {
-        actualSpeed = campaign.state === "paused" ? 0 : campaign.metadata.currentSpeed;
+        actualSpeed =
+          campaign.state === "paused" ? 0 : campaign.metadata.currentSpeed;
       } else {
         // Fallback to API call if no stored speed
         try {
@@ -207,10 +212,10 @@ function createCleanCampaignResponse(
       campaign.state === "paused"
         ? "paused"
         : campaign.state === "created"
-        ? "active"
-        : campaign.state === "archived"
-        ? "archived"
-        : campaign.state,
+          ? "active"
+          : campaign.state === "archived"
+            ? "archived"
+            : campaign.state,
     // Include stats only when requested
     ...(includeStats &&
       vendorStats && {
@@ -226,324 +231,334 @@ function createCleanCampaignResponse(
   };
 }
 
-// Create Alpha campaign (SparkTraffic only)
-router.post("/campaigns", requireRole(), async (req, res) => {
-  logger.campaign("Alpha campaign creation started", {
-    userId: req.user.id,
-    vendor: "sparkTraffic",
-    url: req.body.url,
-  });
-
-  try {
-    const userId = req.user.id;
-    const body = req.body;
-
-    // Basic validation
-    if (!body.url || typeof body.url !== "string" || !body.url.trim()) {
-      logger.error("Invalid URL provided", { userId, url: body.url });
-      return res.status(400).json({ error: "url required" });
-    }
-
-    // Validate geo format if provided
-    if (body.geo) {
-      const geoValidation = validateGeoFormat(body.geo);
-      if (!geoValidation.valid) {
-        logger.error("Invalid geo format", {
-          userId,
-          geo: body.geo,
-          error: geoValidation.error,
-        });
-        return res.status(400).json({ error: geoValidation.error });
-      }
-    }
-
-    // Check user's available hits before creating campaign
-    const user = await User.findById(userId);
-    if (!user) {
-      logger.error("User not found", { userId });
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const requiredHits = body.maxHits || 5;
-    if (user.availableHits < requiredHits) {
-      logger.warn("Insufficient hits", {
-        userId,
-        userEmail: user.email,
-        required: requiredHits,
-        available: user.availableHits,
-      });
-      return res.status(400).json({
-        error: "Insufficient hits",
-        required: requiredHits,
-        available: user.availableHits,
-      });
-    }
-
-    // Check user's credits before creating campaign (1 credit per hit minimum)
-    if (user.credits < requiredHits) {
-      logger.warn("Insufficient credits for Alpha campaign", {
-        userId,
-        userEmail: user.email,
-        requiredCredits: requiredHits,
-        availableCredits: user.credits,
-      });
-      return res.status(400).json({
-        error: "Insufficient credits",
-        required: requiredHits,
-        available: user.credits,
-        message: "Alpha campaigns require 1 credit per hit",
-      });
-    }
-
-    // Ensure required fields have default values
-    if (body.is_adult === undefined) body.is_adult = false;
-    if (body.is_coin_mining === undefined) body.is_coin_mining = false;
-
-    // Default payload for campaign creation
-    const defaultPayload = {
-      title: "Alpha Campaign",
-      urls: [],
-      duration: [5, 15],
-      referrers: { mode: "basic", urls: [] },
-      platform: { usage: { system: 100, fixed: 0, custom: 0 } },
-      macros: "",
-      popupMacros: "",
-      connectionTypes: ["system"],
-      geo: { rule: "any", by: "country", codes: [] },
-      capping: { type: "own", value: 3600 },
-      maxHits: 5,
-      maxPopups: 0,
-      allowProxy: true,
-      allowIPv6: true,
-      bypassCf: false,
-      similarWebEnabled: false,
-      fingerprintSpoof: false,
-      userState: "running",
-    };
-
-    // Merge user input with defaults (user input takes precedence)
-    const merged = { ...defaultPayload, ...req.body };
-
-    // SparkTraffic integration (always use SparkTraffic for Alpha)
-    const vendor = vendors.sparkTraffic;
-
-    // Build SparkTraffic payload following exact API documentation
-    const sparkPayload = {
-      unique_id: merged.unique_id || undefined,
-      created_at: merged.created_at || Date.now(),
-      expires_at: merged.expires_at || 0,
-      title: merged.title,
-      size: merged.size || "eco", // Use provided size or default to eco
-      multiplier: merged.multiplier || 0,
-      speed: merged.speed || 200,
-      traffic_type: merged.traffic_type || "direct",
-      keywords: merged.keywords || "",
-      referrers:
-        merged.referrers && merged.referrers.urls
-          ? merged.referrers.urls.join(",")
-          : "",
-      social_links: merged.social_links || "",
-      languages: merged.languages || "",
-      bounce_rate: merged.bounce_rate || 0,
-      return_rate: merged.return_rate || 0,
-      click_outbound_events: merged.click_outbound_events || 0,
-      form_submit_events: merged.form_submit_events || 0,
-      scroll_events: merged.scroll_events || 0,
-      time_on_page: merged.time_on_page || "5sec",
-      desktop_rate: merged.desktop_rate || 0,
-      auto_renew: merged.auto_renew || "true",
-      geo_type: merged.geo_type || "global",
-      geo: merged.geo ? JSON.stringify(merged.geo) : "",
-      shortener: merged.shortener || "",
-      rss_feed: merged.rss_feed || "",
-      ga_id: merged.ga_id || "",
-    };
-
-    // Handle URLs in SparkTraffic format (urls-1, urls-2, etc.)
-    // Take single URL and populate urls-1, urls-2, urls-3 with the same URL
-    const sparkTrafficUrls = {};
-
-    if (merged.url) {
-      // Use the same URL for urls-1, urls-2, and urls-3
-      sparkPayload["urls-1"] = merged.url;
-      sparkPayload["urls-2"] = merged.url;
-      sparkPayload["urls-3"] = merged.url;
-
-      sparkTrafficUrls["urls-1"] = merged.url;
-      sparkTrafficUrls["urls-2"] = merged.url;
-      sparkTrafficUrls["urls-3"] = merged.url;
-    }
-
-    // If user provides individual URL fields, respect those
-    for (let i = 1; i <= 11; i++) {
-      const urlField = `urls-${i}`;
-      if (merged[urlField]) {
-        sparkPayload[urlField] = merged[urlField];
-        sparkTrafficUrls[urlField] = merged[urlField];
-      }
-    }
-
-    // Handle legacy urls array format (but prioritize single URL approach)
-    if (merged.urls && Array.isArray(merged.urls) && !merged.url) {
-      merged.urls.forEach((url, index) => {
-        if (index < 11 && url && url.trim()) {
-          const urlKey = `urls-${index + 1}`;
-          sparkPayload[urlKey] = url.trim();
-          sparkTrafficUrls[urlKey] = url.trim();
-        }
-      });
-    }
+// Create Alpha campaign (SparkTraffic only) - WITH SUBSCRIPTION CHECK
+router.post(
+  "/campaigns",
+  requireRole(),
+  checkSubscriptionAccess,
+  async (req, res) => {
+    logger.campaign("Alpha campaign creation started", {
+      userId: req.user.id,
+      vendor: "sparkTraffic",
+      url: req.body.url,
+      subscription: {
+        planName: req.subscription.planName,
+        currentCampaigns: req.subscription.currentCampaigns,
+        campaignLimit: req.subscription.campaignLimit,
+      },
+    });
 
     try {
-      const vendorResp = await vendor.createProject(sparkPayload);
-      logger.campaign("Alpha SparkTraffic campaign created", {
-        userId,
-        projectId: vendorResp["new-id"] || vendorResp.id,
-        title: sparkPayload.title,
-      });
+      const userId = req.user.id;
+      const body = req.body;
 
-      // Immediately resume the campaign if it was created in paused state
-      let resumeResp = null;
-      if (vendorResp && vendorResp["new-id"]) {
-        try {
-          // Call the resume endpoint for SparkTraffic
-          const axios = require("axios");
-          const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
-          resumeResp = await axios.post(
-            "https://v2.sparktraffic.com/resume-website-traffic-project",
-            { id: vendorResp["new-id"] },
-            {
-              headers: {
-                "Content-Type": "application/json",
-                API_KEY,
-              },
-            }
-          );
-        } catch (resumeErr) {
-          resumeResp = { error: resumeErr.message };
+      // Basic validation
+      if (!body.url || typeof body.url !== "string" || !body.url.trim()) {
+        logger.error("Invalid URL provided", { userId, url: body.url });
+        return res.status(400).json({ error: "url required" });
+      }
+
+      // Validate geo format if provided
+      if (body.geo) {
+        const geoValidation = validateGeoFormat(body.geo);
+        if (!geoValidation.valid) {
+          logger.error("Invalid geo format", {
+            userId,
+            geo: body.geo,
+            error: geoValidation.error,
+          });
+          return res.status(400).json({ error: geoValidation.error });
         }
       }
 
-      // Save to DB with proper geo format handling
-      const projectId =
-        vendorResp["new-id"] || vendorResp.id || vendorResp.project_id;
-
-      // Handle countries/geo data properly for both old and new formats
-      let countriesData = [];
-      if (merged.geo) {
-        if (Array.isArray(merged.geo)) {
-          // New format: array of objects with country and percent
-          countriesData = merged.geo;
-        } else if (merged.geo.codes && Array.isArray(merged.geo.codes)) {
-          // Old format: geo object with codes array
-          countriesData = merged.geo.codes;
-        }
-      } else if (merged.countries) {
-        // Direct countries field
-        countriesData = merged.countries;
+      // Check user's available hits before creating campaign
+      const user = await User.findById(userId);
+      if (!user) {
+        logger.error("User not found", { userId });
+        return res.status(404).json({ error: "User not found" });
       }
 
-      const camp = new Campaign({
-        user: userId,
-        title: sparkPayload.title,
-        urls: merged.urls || [], // Keep for backward compatibility
-        duration_min: merged.duration[0],
-        duration_max: merged.duration[1],
-        countries: countriesData,
-        rule: merged.rule || "any",
-        macros: merged.macros,
-        is_adult: merged.is_adult,
-        is_coin_mining: merged.is_coin_mining,
-        spark_traffic_project_id: projectId,
-        state: "created",
-        metadata: {
-          ...body.metadata,
-          vendor: "sparkTraffic",
-          route: "alpha",
-          sparkTrafficUrls: sparkTrafficUrls, // Store the URL mapping
-          currentSpeed: sparkPayload.speed || 200, // Store the current speed
-        },
-        spark_traffic_data: vendorResp,
-      });
+      const requiredHits = body.maxHits || 5;
+      if (user.availableHits < requiredHits) {
+        logger.warn("Insufficient hits", {
+          userId,
+          userEmail: user.email,
+          required: requiredHits,
+          available: user.availableHits,
+        });
+        return res.status(400).json({
+          error: "Insufficient hits",
+          required: requiredHits,
+          available: user.availableHits,
+        });
+      }
 
-      await camp.save();
+      // Check user's credits before creating campaign (1 credit per hit minimum)
+      if (user.credits < requiredHits) {
+        logger.warn("Insufficient credits for Alpha campaign", {
+          userId,
+          userEmail: user.email,
+          requiredCredits: requiredHits,
+          availableCredits: user.credits,
+        });
+        return res.status(400).json({
+          error: "Insufficient credits",
+          required: requiredHits,
+          available: user.credits,
+          message: "Alpha campaigns require 1 credit per hit",
+        });
+      }
 
-      logger.campaign("Alpha campaign saved with metadata", {
-        userId,
-        campaignId: camp._id,
-        storedSpeed: camp.metadata?.currentSpeed,
-        sparkPayloadSpeed: sparkPayload.speed,
-        mergedSpeed: merged.speed,
-        requestBodySpeed: req.body.speed,
-      });
+      // Ensure required fields have default values
+      if (body.is_adult === undefined) body.is_adult = false;
+      if (body.is_coin_mining === undefined) body.is_coin_mining = false;
 
-      // Deduct hits from user after successful campaign creation
-      user.availableHits -= requiredHits;
-      await user.save();
+      // Default payload for campaign creation
+      const defaultPayload = {
+        title: "Alpha Campaign",
+        urls: [],
+        duration: [5, 15],
+        referrers: { mode: "basic", urls: [] },
+        platform: { usage: { system: 100, fixed: 0, custom: 0 } },
+        macros: "",
+        popupMacros: "",
+        connectionTypes: ["system"],
+        geo: { rule: "any", by: "country", codes: [] },
+        capping: { type: "own", value: 3600 },
+        maxHits: 5,
+        maxPopups: 0,
+        allowProxy: true,
+        allowIPv6: true,
+        bypassCf: false,
+        similarWebEnabled: false,
+        fingerprintSpoof: false,
+        userState: "running",
+      };
 
-      // Initialize Alpha traffic tracking for the new campaign
+      // Merge user input with defaults (user input takes precedence)
+      const merged = { ...defaultPayload, ...req.body };
+
+      // SparkTraffic integration (always use SparkTraffic for Alpha)
+      const vendor = vendors.sparkTraffic;
+
+      // Build SparkTraffic payload following exact API documentation
+      const sparkPayload = {
+        unique_id: merged.unique_id || undefined,
+        created_at: merged.created_at || Date.now(),
+        expires_at: merged.expires_at || 0,
+        title: merged.title,
+        size: merged.size || "eco", // Use provided size or default to eco
+        multiplier: merged.multiplier || 0,
+        speed: merged.speed || 200,
+        traffic_type: merged.traffic_type || "direct",
+        keywords: merged.keywords || "",
+        referrers:
+          merged.referrers && merged.referrers.urls
+            ? merged.referrers.urls.join(",")
+            : "",
+        social_links: merged.social_links || "",
+        languages: merged.languages || "",
+        bounce_rate: merged.bounce_rate || 0,
+        return_rate: merged.return_rate || 0,
+        click_outbound_events: merged.click_outbound_events || 0,
+        form_submit_events: merged.form_submit_events || 0,
+        scroll_events: merged.scroll_events || 0,
+        time_on_page: merged.time_on_page || "5sec",
+        desktop_rate: merged.desktop_rate || 0,
+        auto_renew: merged.auto_renew || "true",
+        geo_type: merged.geo_type || "global",
+        geo: merged.geo ? JSON.stringify(merged.geo) : "",
+        shortener: merged.shortener || "",
+        rss_feed: merged.rss_feed || "",
+        ga_id: merged.ga_id || "",
+      };
+
+      // Handle URLs in SparkTraffic format (urls-1, urls-2, etc.)
+      // Take single URL and populate urls-1, urls-2, urls-3 with the same URL
+      const sparkTrafficUrls = {};
+
+      if (merged.url) {
+        // Use the same URL for urls-1, urls-2, and urls-3
+        sparkPayload["urls-1"] = merged.url;
+        sparkPayload["urls-2"] = merged.url;
+        sparkPayload["urls-3"] = merged.url;
+
+        sparkTrafficUrls["urls-1"] = merged.url;
+        sparkTrafficUrls["urls-2"] = merged.url;
+        sparkTrafficUrls["urls-3"] = merged.url;
+      }
+
+      // If user provides individual URL fields, respect those
+      for (let i = 1; i <= 11; i++) {
+        const urlField = `urls-${i}`;
+        if (merged[urlField]) {
+          sparkPayload[urlField] = merged[urlField];
+          sparkTrafficUrls[urlField] = merged[urlField];
+        }
+      }
+
+      // Handle legacy urls array format (but prioritize single URL approach)
+      if (merged.urls && Array.isArray(merged.urls) && !merged.url) {
+        merged.urls.forEach((url, index) => {
+          if (index < 11 && url && url.trim()) {
+            const urlKey = `urls-${index + 1}`;
+            sparkPayload[urlKey] = url.trim();
+            sparkTrafficUrls[urlKey] = url.trim();
+          }
+        });
+      }
+
       try {
-        await alphaTrafficTrackingService.initializeAlphaTrafficTracking(
-          camp._id.toString(),
-          projectId
-        );
-        logger.campaign("Alpha traffic tracking initialized", {
+        const vendorResp = await vendor.createProject(sparkPayload);
+        logger.campaign("Alpha SparkTraffic campaign created", {
+          userId,
+          projectId: vendorResp["new-id"] || vendorResp.id,
+          title: sparkPayload.title,
+        });
+
+        // Immediately resume the campaign if it was created in paused state
+        let resumeResp = null;
+        if (vendorResp && vendorResp["new-id"]) {
+          try {
+            // Call the resume endpoint for SparkTraffic
+            const axios = require("axios");
+            const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+            resumeResp = await axios.post(
+              "https://v2.sparktraffic.com/resume-website-traffic-project",
+              { id: vendorResp["new-id"] },
+              {
+                headers: {
+                  "Content-Type": "application/json",
+                  API_KEY,
+                },
+              }
+            );
+          } catch (resumeErr) {
+            resumeResp = { error: resumeErr.message };
+          }
+        }
+
+        // Save to DB with proper geo format handling
+        const projectId =
+          vendorResp["new-id"] || vendorResp.id || vendorResp.project_id;
+
+        // Handle countries/geo data properly for both old and new formats
+        let countriesData = [];
+        if (merged.geo) {
+          if (Array.isArray(merged.geo)) {
+            // New format: array of objects with country and percent
+            countriesData = merged.geo;
+          } else if (merged.geo.codes && Array.isArray(merged.geo.codes)) {
+            // Old format: geo object with codes array
+            countriesData = merged.geo.codes;
+          }
+        } else if (merged.countries) {
+          // Direct countries field
+          countriesData = merged.countries;
+        }
+
+        const camp = new Campaign({
+          user: userId,
+          title: sparkPayload.title,
+          urls: merged.urls || [], // Keep for backward compatibility
+          duration_min: merged.duration[0],
+          duration_max: merged.duration[1],
+          countries: countriesData,
+          rule: merged.rule || "any",
+          macros: merged.macros,
+          is_adult: merged.is_adult,
+          is_coin_mining: merged.is_coin_mining,
+          spark_traffic_project_id: projectId,
+          state: "created",
+          metadata: {
+            ...body.metadata,
+            vendor: "sparkTraffic",
+            route: "alpha",
+            sparkTrafficUrls: sparkTrafficUrls, // Store the URL mapping
+            currentSpeed: sparkPayload.speed || 200, // Store the current speed
+          },
+          spark_traffic_data: vendorResp,
+        });
+
+        await camp.save();
+
+        logger.campaign("Alpha campaign saved with metadata", {
+          userId,
+          campaignId: camp._id,
+          storedSpeed: camp.metadata?.currentSpeed,
+          sparkPayloadSpeed: sparkPayload.speed,
+          mergedSpeed: merged.speed,
+          requestBodySpeed: req.body.speed,
+        });
+
+        // Deduct hits from user after successful campaign creation
+        user.availableHits -= requiredHits;
+        await user.save();
+
+        // Initialize Alpha traffic tracking for the new campaign
+        try {
+          await alphaTrafficTrackingService.initializeAlphaTrafficTracking(
+            camp._id.toString(),
+            projectId
+          );
+          logger.campaign("Alpha traffic tracking initialized", {
+            userId,
+            campaignId: camp._id,
+            sparkTrafficProjectId: projectId,
+          });
+        } catch (trackingErr) {
+          logger.error("Failed to initialize Alpha traffic tracking", {
+            userId,
+            campaignId: camp._id,
+            sparkTrafficProjectId: projectId,
+            error: trackingErr.message,
+          });
+          // Don't fail the campaign creation if tracking initialization fails
+        }
+
+        logger.campaign("Alpha campaign created successfully", {
           userId,
           campaignId: camp._id,
           sparkTrafficProjectId: projectId,
-        });
-      } catch (trackingErr) {
-        logger.error("Failed to initialize Alpha traffic tracking", {
-          userId,
-          campaignId: camp._id,
-          sparkTrafficProjectId: projectId,
-          error: trackingErr.message,
-        });
-        // Don't fail the campaign creation if tracking initialization fails
-      }
-
-      logger.campaign("Alpha campaign created successfully", {
-        userId,
-        campaignId: camp._id,
-        sparkTrafficProjectId: projectId,
-        hitsDeducted: requiredHits,
-        remainingHits: user.availableHits,
-      });
-
-      return res.json({
-        ok: true,
-        campaign: createCleanCampaignResponse(camp, true, {
-          totalHits: 0,
-          totalVisits: 0,
-          speed: sparkPayload.speed, // Use the actual speed from the request
-          status: "active",
-          dailyHits: [],
-          dailyVisits: [],
-        }),
-        userStats: {
           hitsDeducted: requiredHits,
           remainingHits: user.availableHits,
-        },
-        message: "Alpha campaign created successfully",
-        vendor: "sparkTraffic",
-      });
+        });
+
+        return res.json({
+          ok: true,
+          campaign: createCleanCampaignResponse(camp, true, {
+            totalHits: 0,
+            totalVisits: 0,
+            speed: sparkPayload.speed, // Use the actual speed from the request
+            status: "active",
+            dailyHits: [],
+            dailyVisits: [],
+          }),
+          userStats: {
+            hitsDeducted: requiredHits,
+            remainingHits: user.availableHits,
+          },
+          message: "Alpha campaign created successfully",
+          vendor: "sparkTraffic",
+        });
+      } catch (err) {
+        logger.error("Alpha SparkTraffic campaign creation failed", {
+          userId,
+          error: err.message,
+          stack: err.stack,
+        });
+        return res.status(500).json({ error: err.message });
+      }
     } catch (err) {
-      logger.error("Alpha SparkTraffic campaign creation failed", {
-        userId,
+      logger.error("Alpha campaign creation failed", {
+        userId: req.user.id,
         error: err.message,
         stack: err.stack,
       });
-      return res.status(500).json({ error: err.message });
+      res.status(500).json({ error: err.message });
     }
-  } catch (err) {
-    logger.error("Alpha campaign creation failed", {
-      userId: req.user.id,
-      error: err.message,
-      stack: err.stack,
-    });
-    res.status(500).json({ error: err.message });
   }
-});
+);
 
 // Get Alpha campaigns with time range filtering (SparkTraffic only)
 router.get("/campaigns/filter", requireRole(), async (req, res) => {
@@ -775,12 +790,16 @@ router.get("/campaigns", requireRole(), async (req, res) => {
         } else {
           // For basic stats, use stored speed from metadata or fallback
           let actualSpeed = campaign.state === "paused" ? 0 : 200; // Default fallback
-          
+
           // Try to get speed from stored metadata
-          if (campaign.metadata && campaign.metadata.currentSpeed !== undefined) {
-            actualSpeed = campaign.state === "paused" ? 0 : campaign.metadata.currentSpeed;
+          if (
+            campaign.metadata &&
+            campaign.metadata.currentSpeed !== undefined
+          ) {
+            actualSpeed =
+              campaign.state === "paused" ? 0 : campaign.metadata.currentSpeed;
           }
-          
+
           const basicStats = {
             totalHits: campaign.total_hits_counted || 0,
             totalVisits: campaign.total_visits_counted || 0,
@@ -943,9 +962,14 @@ router.get("/campaigns/:id", requireRole(), async (req, res) => {
           ...statsResp.data,
           totalHits,
           totalVisits,
-          speed: projectDetails?.speed !== undefined ? projectDetails.speed : 
-                 (c.metadata?.currentSpeed !== undefined ? c.metadata.currentSpeed : 
-                  (c.state === "paused" ? 0 : 200)),
+          speed:
+            projectDetails?.speed !== undefined
+              ? projectDetails.speed
+              : c.metadata?.currentSpeed !== undefined
+                ? c.metadata.currentSpeed
+                : c.state === "paused"
+                  ? 0
+                  : 200,
           ...(projectDetails && {
             projectDetails: {
               speed: projectDetails.speed,
@@ -969,9 +993,14 @@ router.get("/campaigns/:id", requireRole(), async (req, res) => {
         details: err.message,
         totalHits: 0,
         totalVisits: 0,
-        speed: c.metadata?.currentSpeed !== undefined ? 
-               (c.state === "paused" ? 0 : c.metadata.currentSpeed) : 
-               (c.state === "paused" ? 0 : 200),
+        speed:
+          c.metadata?.currentSpeed !== undefined
+            ? c.state === "paused"
+              ? 0
+              : c.metadata.currentSpeed
+            : c.state === "paused"
+              ? 0
+              : 200,
       };
     }
 
@@ -1057,8 +1086,8 @@ router.post("/campaigns/:id/pause", requireRole(), async (req, res) => {
         vendorResp && vendorResp.data
           ? vendorResp.data
           : vendorResp && vendorResp.error
-          ? { error: vendorResp.error }
-          : vendorResp,
+            ? { error: vendorResp.error }
+            : vendorResp,
     });
   } catch (err) {
     logger.error("Alpha campaign pause failed", {
@@ -1156,8 +1185,8 @@ router.post("/campaigns/:id/resume", requireRole(), async (req, res) => {
         vendorResp && vendorResp.data
           ? vendorResp.data
           : vendorResp && vendorResp.error
-          ? { error: vendorResp.error }
-          : vendorResp,
+            ? { error: vendorResp.error }
+            : vendorResp,
     });
   } catch (err) {
     logger.error("Alpha campaign resume failed", {
@@ -1209,7 +1238,7 @@ router.post("/campaigns/:id/modify", requireRole(), async (req, res) => {
     if (req.body.geo) {
       // Map geo to countries for MongoDB storage
       req.body.countries = req.body.geo;
-      
+
       // Validate geo format
       const geoValidation = validateGeoFormat(req.body.geo);
       if (!geoValidation.valid) {
@@ -1242,11 +1271,11 @@ router.post("/campaigns/:id/modify", requireRole(), async (req, res) => {
     });
 
     // Update metadata to maintain Alpha route info and store current speed
-    c.metadata = { 
-      ...c.metadata, 
-      ...req.body.metadata, 
+    c.metadata = {
+      ...c.metadata,
+      ...req.body.metadata,
       route: "alpha",
-      ...(req.body.speed !== undefined && { currentSpeed: req.body.speed })
+      ...(req.body.speed !== undefined && { currentSpeed: req.body.speed }),
     };
 
     // Update on SparkTraffic

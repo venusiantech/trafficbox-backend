@@ -16,9 +16,10 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.18.1",
     "node-cron": "^4.2.1",
+    "puppeteer": "^22.10.0",
+    "stripe": "^14.25.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "uuid": "^8.3.2",
-    "puppeteer": "^22.10.0"
+    "uuid": "^8.3.2"
   }
 }

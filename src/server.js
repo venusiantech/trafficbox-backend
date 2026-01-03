@@ -15,10 +15,10 @@ app.use(express.json());
 // Set timeout for all requests to 6 minutes (slightly longer than AI timeout)
 app.use((req, res, next) => {
   // Set timeout for AI blog generation endpoints
-  if (req.path.includes('/ai/research-blog-writer')) {
+  if (req.path.includes("/ai/research-blog-writer")) {
     req.setTimeout(360000); // 6 minutes for blog generation
     res.setTimeout(360000);
-  } else if (req.path.includes('/ai/')) {
+  } else if (req.path.includes("/ai/")) {
     req.setTimeout(180000); // 3 minutes for other AI endpoints
     res.setTimeout(180000);
   } else {
@@ -62,6 +62,7 @@ app.get("/", (req, res) => {
       websites: "/api/websites",
       admin: "/api/admin",
       blogs: "/api/blogs", // Blog management routes
+      subscription: "/api/subscription", // Stripe subscription management
     },
     documentation: "/api-docs",
   });
@@ -93,6 +94,7 @@ app.use("/api/me", require("./routes/me"));
 app.use("/api/websites", require("./routes/websites"));
 app.use("/api/admin", require("./routes/admin"));
 app.use("/api/blogs", require("./routes/blogs")); // Blog management routes
+app.use("/api/subscription", require("./routes/subscription")); // Stripe subscription routes
 
 // Start sync worker
 require("./sync/syncWorker")();

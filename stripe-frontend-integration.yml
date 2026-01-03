@@ -1,0 +1,981 @@
+# 💳 Stripe Subscription Integration - Frontend Developer Guide
+# ================================================================
+# This file explains how to integrate the TrafficBox Stripe subscription
+# system into your frontend application (React, Vue, Angular, etc.)
+
+api:
+  base_url: "http://localhost:5000"
+  production_url: "https://your-production-api.com"
+
+  authentication:
+    method: "Bearer Token (JWT)"
+    header: "Authorization: Bearer {token}"
+    token_source: "Login response after user authentication"
+    token_expiry: "7 days"
+
+# ============================================================
+# STEP 1: AUTHENTICATION FLOW
+# ============================================================
+authentication_flow:
+  register_user:
+    endpoint: "/api/auth/register"
+    method: "POST"
+    requires_auth: false
+    request_body:
+      email: "user@example.com"
+      password: "securePassword123"
+      firstName: "John"
+      lastName: "Doe"
+      dob: "1990-01-01"
+    response_success:
+      success: true
+      message: "User registered successfully"
+      token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      user:
+        id: "507f1f77bcf86cd799439011"
+        email: "user@example.com"
+        firstName: "John"
+        lastName: "Doe"
+        role: "user"
+        credits: 5000
+        availableHits: 1666
+        createdAt: "2026-01-03T00:00:00.000Z"
+
+  login_user:
+    endpoint: "/api/auth/login"
+    method: "POST"
+    requires_auth: false
+    request_body:
+      email: "user@example.com"
+      password: "securePassword123"
+    response_success:
+      success: true
+      message: "User logged in successfully"
+      token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+      user:
+        id: "507f1f77bcf86cd799439011"
+        email: "user@example.com"
+        role: "user"
+        credits: 5000
+        availableHits: 1666
+    note: "Store the token in localStorage or secure cookie"
+
+# ============================================================
+# STEP 2: SUBSCRIPTION MANAGEMENT
+# ============================================================
+subscription_management:
+  get_current_subscription:
+    endpoint: "/api/subscription/subscription"
+    method: "GET"
+    requires_auth: true
+    description: "Get user's current subscription details"
+    response_success:
+      ok: true
+      subscription:
+        planName: "free"
+        status: "active"
+        visitsIncluded: 1000
+        visitsUsed: 150
+        campaignLimit: 1
+        currentCampaignCount: 0
+        features:
+          countryTargeting: "global"
+          trafficSources: "none"
+          behaviorSettings: "none"
+          campaignRenewal: "manual"
+          support: "email"
+          analytics: "basic"
+        currentPeriodStart: "2026-01-01T00:00:00.000Z"
+        currentPeriodEnd: "2027-01-01T00:00:00.000Z"
+        cancelAtPeriodEnd: false
+    ui_usage: |
+      Display this data in:
+      - Dashboard header
+      - Settings page
+      - Upgrade modal
+      - Campaign creation page (show limits)
+
+  get_all_plans:
+    endpoint: "/api/subscription/plans"
+    method: "GET"
+    requires_auth: false
+    description: "Get all available subscription plans"
+    response_success:
+      ok: true
+      plans:
+        - planName: "free"
+          visitsIncluded: 1000
+          campaignLimit: 1
+          price: 0
+          features:
+            countryTargeting: "global"
+            trafficSources: "none"
+            behaviorSettings: "none"
+            campaignRenewal: "manual"
+            support: "email"
+            analytics: "basic"
+          description: "Perfect for testing and small projects"
+        - planName: "starter"
+          visitsIncluded: 50000
+          campaignLimit: 2
+          price: 49
+          description: "Great for individuals and small businesses"
+        - planName: "growth"
+          visitsIncluded: 250000
+          campaignLimit: 3
+          price: 199
+          description: "Ideal for growing businesses with multiple campaigns"
+        - planName: "business"
+          visitsIncluded: 500000
+          campaignLimit: 5
+          price: 349
+          description: "For established businesses with high traffic needs"
+        - planName: "premium"
+          visitsIncluded: 1000000
+          campaignLimit: 10
+          price: 599
+          description: "Enterprise-level solution with full features and support"
+    ui_usage: "Display in pricing page, upgrade modal"
+
+# ============================================================
+# STEP 3: UPGRADE FLOW (STRIPE CHECKOUT)
+# ============================================================
+upgrade_flow:
+  create_checkout_session:
+    endpoint: "/api/subscription/checkout"
+    method: "POST"
+    requires_auth: true
+    description: "Create a Stripe Checkout session for upgrading"
+    request_body:
+      planName: "growth"
+      successUrl: "https://your-frontend.com/subscription/success"
+      cancelUrl: "https://your-frontend.com/subscription/cancel"
+    response_success:
+      ok: true
+      sessionId: "cs_test_a1b2c3d4e5f6g7h8i9j0"
+      url: "https://checkout.stripe.com/c/pay/cs_test_..."
+      message: "Checkout session created successfully"
+    response_error_400:
+      error: "Invalid plan name"
+      validPlans: ["starter", "growth", "business", "premium"]
+
+    frontend_implementation: |
+      When user clicks "Upgrade" button:
+      1. Call this endpoint with desired plan
+      2. Get checkout URL from response
+      3. Redirect user to Stripe Checkout: window.location.href = response.url
+      4. Stripe handles payment collection
+      5. User redirected to successUrl after payment
+      6. Subscription automatically synced via webhook
+
+  upgrade_existing_subscription:
+    endpoint: "/api/subscription/upgrade"
+    method: "POST"
+    requires_auth: true
+    description: "Upgrade existing subscription (requires active payment method)"
+    request_body:
+      planName: "business"
+    response_success:
+      ok: true
+      message: "Subscription upgraded successfully"
+      subscription:
+        planName: "business"
+        status: "active"
+        visitsIncluded: 500000
+        campaignLimit: 5
+    note: "Use this for existing paying customers to upgrade instantly"
+
+  downgrade_subscription:
+    endpoint: "/api/subscription/downgrade"
+    method: "POST"
+    requires_auth: true
+    description: "Downgrade to a lower plan"
+    request_body:
+      planName: "starter"
+    response_success:
+      ok: true
+      message: "Subscription downgraded successfully"
+    warning: "Existing campaigns beyond new limit remain active but no new ones can be created"
+
+# ============================================================
+# STEP 4: SUBSCRIPTION MANAGEMENT ACTIONS
+# ============================================================
+subscription_actions:
+  cancel_subscription:
+    endpoint: "/api/subscription/cancel"
+    method: "POST"
+    requires_auth: true
+    description: "Cancel subscription (remains active until period end)"
+    request_body:
+      cancelAtPeriodEnd: true
+    response_success:
+      ok: true
+      message: "Subscription will be canceled at the end of the billing period"
+      subscription:
+        planName: "growth"
+        status: "active"
+        cancelAtPeriodEnd: true
+        currentPeriodEnd: "2026-02-01T00:00:00.000Z"
+    ui_feedback: |
+      Show message: "Your subscription will remain active until {currentPeriodEnd}, 
+      then you'll be moved to the Free plan."
+
+  reactivate_subscription:
+    endpoint: "/api/subscription/reactivate"
+    method: "POST"
+    requires_auth: true
+    description: "Reactivate a canceled subscription"
+    response_success:
+      ok: true
+      message: "Subscription reactivated successfully"
+    ui_usage: "Show 'Reactivate' button if cancelAtPeriodEnd is true"
+
+# ============================================================
+# STEP 5: CAMPAIGN CREATION (PROTECTED)
+# ============================================================
+protected_campaign_creation:
+  create_campaign:
+    endpoint: "/api/alpha/campaigns"
+    method: "POST"
+    requires_auth: true
+    subscription_check: true
+    description: "Create a new campaign (subscription limits enforced)"
+    request_body:
+      url: "https://example.com"
+      title: "My Campaign"
+      maxHits: 5
+      geo:
+        - country: "US"
+          percent: 0.5
+        - country: "CA"
+          percent: 0.5
+      speed: 200
+
+    response_success:
+      ok: true
+      campaign:
+        id: "507f1f77bcf86cd799439011"
+        title: "My Campaign"
+        url: "https://example.com"
+        status: "active"
+
+    response_error_403_limit_reached:
+      error: "Campaign limit reached"
+      message: "Campaign limit reached for free plan. You have 1/1 campaigns."
+      currentPlan:
+        name: "free"
+        campaignLimit: 1
+        currentCampaigns: 1
+        visitsIncluded: 1000
+        visitsUsed: 250
+      suggestion: "Upgrade your plan to create more campaigns."
+
+    response_error_403_visits_exceeded:
+      error: "Campaign limit reached"
+      message: "Visit limit reached for starter plan. You have used 50000/50000 visits."
+      currentPlan:
+        name: "starter"
+        campaignLimit: 2
+        currentCampaigns: 1
+        visitsIncluded: 50000
+        visitsUsed: 50000
+      suggestion: "You have reached your visit limit. Upgrade for more visits."
+
+    response_error_403_inactive:
+      error: "Subscription inactive"
+      message: "Your subscription is past_due. Please update your payment method or upgrade your plan."
+      subscriptionStatus: "past_due"
+      planName: "growth"
+
+    frontend_handling: |
+      if (response.status === 403) {
+        if (response.error === "Campaign limit reached") {
+          // Show upgrade modal with current plan details
+          showUpgradeModal({
+            currentPlan: response.currentPlan,
+            reason: response.message
+          });
+        } else if (response.error === "Subscription inactive") {
+          // Show payment update prompt
+          showPaymentUpdatePrompt();
+        }
+      }
+
+# ============================================================
+# STEP 6: UI COMPONENTS & USER EXPERIENCE
+# ============================================================
+ui_components:
+  subscription_status_widget:
+    location: "Dashboard header"
+    data_source: "GET /api/subscription/subscription"
+    display_elements:
+      - plan_name: "Display with icon/badge"
+      - campaign_usage: "1/1 campaigns (with progress bar)"
+      - visit_usage: "250/1,000 visits (with progress bar)"
+      - upgrade_button: "Show if at limit"
+    refresh_interval: "On page load, after campaign creation, after upgrade"
+
+  pricing_page:
+    data_source: "GET /api/subscription/plans"
+    features:
+      - display_all_5_plans: true
+      - highlight_current_plan: true
+      - show_feature_comparison: true
+      - upgrade_buttons: "Call /api/subscription/checkout"
+    layout_suggestion: |
+      Grid of 5 cards:
+      - Free (highlight for new users)
+      - Starter
+      - Growth (highlight as "Most Popular")
+      - Business
+      - Premium
+
+  upgrade_modal:
+    trigger_conditions:
+      - campaign_limit_reached: true
+      - visit_limit_near: "90% of limit"
+      - user_clicks_upgrade_button: true
+    display_data:
+      current_plan: "From subscription API"
+      recommended_plans: "Plans with higher limits"
+      feature_comparison: "Current vs. recommended"
+    action_buttons:
+      - label: "Upgrade to Growth ($199/mo)"
+        action: "Create checkout session"
+      - label: "See all plans"
+        action: "Navigate to pricing page"
+      - label: "Maybe later"
+        action: "Close modal"
+
+  campaign_creation_page:
+    before_form:
+      display: "Current usage: X/Y campaigns"
+      conditional_banner: |
+        if (currentCampaigns >= campaignLimit) {
+          show: "You've reached your campaign limit. Upgrade to create more."
+          disable_form: true
+          show_upgrade_button: true
+        }
+
+    on_submit_error_403:
+      action: "Show upgrade modal with error details"
+      fallback: "Display error message and upgrade prompt"
+
+  settings_page_subscription_section:
+    displays:
+      - current_plan_details: true
+      - billing_cycle: true
+      - next_billing_date: true
+      - payment_method: "Link to Stripe customer portal (future)"
+      - cancel_subscription_button: true
+      - reactivate_button: "If canceled"
+    actions:
+      - upgrade_plan: "Redirect to pricing page"
+      - downgrade_plan: "Show confirmation modal"
+      - cancel_subscription: "Show confirmation modal"
+
+# ============================================================
+# STEP 7: ERROR HANDLING
+# ============================================================
+error_handling:
+  common_errors:
+    401_unauthorized:
+      message: "Authentication required"
+      action: "Redirect to login page"
+      check: "Verify JWT token is present and valid"
+
+    403_forbidden:
+      campaign_limit:
+        message: "Campaign limit reached"
+        action: "Show upgrade modal"
+        ui_element: "Disable campaign creation button"
+
+      subscription_inactive:
+        message: "Subscription inactive"
+        action: "Show payment update prompt"
+        stripe_action: "Redirect to update payment method"
+
+      feature_not_available:
+        message: "Feature not available in your plan"
+        action: "Show feature comparison modal"
+        example: "Advanced country targeting requires Growth plan or higher"
+
+    400_bad_request:
+      invalid_plan_name:
+        message: "Invalid plan name"
+        valid_values: ["free", "starter", "growth", "business", "premium"]
+
+      invalid_request_data:
+        message: "Validation error"
+        check: "Verify all required fields are present"
+
+    500_server_error:
+      message: "Server error"
+      action: "Show retry button, contact support"
+      log: "Send error to error tracking service"
+
+  network_errors:
+    timeout:
+      action: "Show retry button"
+      message: "Request timed out. Please try again."
+
+    offline:
+      action: "Show offline message"
+      message: "No internet connection. Please check your network."
+
+# ============================================================
+# STEP 8: FRONTEND CODE EXAMPLES
+# ============================================================
+code_examples:
+  react_subscription_hook:
+    language: "javascript"
+    framework: "React"
+    code: |
+      // useSubscription.js - Custom React Hook
+      import { useState, useEffect } from 'react';
+
+      export const useSubscription = (token) => {
+        const [subscription, setSubscription] = useState(null);
+        const [loading, setLoading] = useState(true);
+        const [error, setError] = useState(null);
+        
+        useEffect(() => {
+          const fetchSubscription = async () => {
+            try {
+              const response = await fetch('http://localhost:5000/api/subscription/subscription', {
+                headers: {
+                  'Authorization': `Bearer ${token}`
+                }
+              });
+              
+              if (!response.ok) {
+                throw new Error('Failed to fetch subscription');
+              }
+              
+              const data = await response.json();
+              setSubscription(data.subscription);
+            } catch (err) {
+              setError(err.message);
+            } finally {
+              setLoading(false);
+            }
+          };
+          
+          if (token) {
+            fetchSubscription();
+          }
+        }, [token]);
+        
+        const canCreateCampaign = () => {
+          if (!subscription) return false;
+          return subscription.currentCampaignCount < subscription.campaignLimit;
+        };
+        
+        const getUpgradeRecommendation = () => {
+          if (!subscription) return null;
+          
+          const planOrder = ['free', 'starter', 'growth', 'business', 'premium'];
+          const currentIndex = planOrder.indexOf(subscription.planName);
+          
+          if (currentIndex < planOrder.length - 1) {
+            return planOrder[currentIndex + 1];
+          }
+          return null;
+        };
+        
+        return {
+          subscription,
+          loading,
+          error,
+          canCreateCampaign,
+          getUpgradeRecommendation
+        };
+      };
+
+  react_upgrade_button:
+    language: "javascript"
+    framework: "React"
+    code: |
+      // UpgradeButton.jsx
+      import React, { useState } from 'react';
+
+      const UpgradeButton = ({ token, planName, currentPlan }) => {
+        const [loading, setLoading] = useState(false);
+        
+        const handleUpgrade = async () => {
+          setLoading(true);
+          
+          try {
+            const response = await fetch('http://localhost:5000/api/subscription/checkout', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                planName: planName,
+                successUrl: `${window.location.origin}/subscription/success`,
+                cancelUrl: `${window.location.origin}/subscription/cancel`
+              })
+            });
+            
+            const data = await response.json();
+            
+            if (data.ok) {
+              // Redirect to Stripe Checkout
+              window.location.href = data.url;
+            } else {
+              alert('Failed to create checkout session');
+            }
+          } catch (error) {
+            console.error('Upgrade error:', error);
+            alert('Something went wrong. Please try again.');
+          } finally {
+            setLoading(false);
+          }
+        };
+        
+        return (
+          <button
+            onClick={handleUpgrade}
+            disabled={loading || currentPlan === planName}
+            className="upgrade-button"
+          >
+            {loading ? 'Processing...' : `Upgrade to ${planName}`}
+          </button>
+        );
+      };
+
+      export default UpgradeButton;
+
+  react_subscription_widget:
+    language: "javascript"
+    framework: "React"
+    code: |
+      // SubscriptionWidget.jsx
+      import React from 'react';
+      import { useSubscription } from './useSubscription';
+
+      const SubscriptionWidget = ({ token }) => {
+        const { subscription, loading, canCreateCampaign } = useSubscription(token);
+        
+        if (loading) return <div>Loading...</div>;
+        if (!subscription) return null;
+        
+        const campaignPercent = (subscription.currentCampaignCount / subscription.campaignLimit) * 100;
+        const visitsPercent = (subscription.visitsUsed / subscription.visitsIncluded) * 100;
+        
+        return (
+          <div className="subscription-widget">
+            <h3>Current Plan: {subscription.planName.toUpperCase()}</h3>
+            
+            <div className="usage-section">
+              <div className="usage-item">
+                <span>Campaigns</span>
+                <div className="progress-bar">
+                  <div 
+                    className="progress-fill" 
+                    style={{ width: `${campaignPercent}%` }}
+                  />
+                </div>
+                <span>{subscription.currentCampaignCount} / {subscription.campaignLimit}</span>
+              </div>
+              
+              <div className="usage-item">
+                <span>Visits This Month</span>
+                <div className="progress-bar">
+                  <div 
+                    className="progress-fill" 
+                    style={{ width: `${visitsPercent}%` }}
+                  />
+                </div>
+                <span>{subscription.visitsUsed.toLocaleString()} / {subscription.visitsIncluded.toLocaleString()}</span>
+              </div>
+            </div>
+            
+            {!canCreateCampaign() && (
+              <div className="upgrade-prompt">
+                <p>Campaign limit reached!</p>
+                <button onClick={() => window.location.href = '/pricing'}>
+                  Upgrade Plan
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      export default SubscriptionWidget;
+
+  vue_composition_api:
+    language: "javascript"
+    framework: "Vue 3 (Composition API)"
+    code: |
+      // useSubscription.js - Vue Composable
+      import { ref, computed } from 'vue';
+
+      export const useSubscription = (token) => {
+        const subscription = ref(null);
+        const loading = ref(true);
+        const error = ref(null);
+        
+        const fetchSubscription = async () => {
+          try {
+            const response = await fetch('http://localhost:5000/api/subscription/subscription', {
+              headers: {
+                'Authorization': `Bearer ${token.value}`
+              }
+            });
+            
+            const data = await response.json();
+            subscription.value = data.subscription;
+          } catch (err) {
+            error.value = err.message;
+          } finally {
+            loading.value = false;
+          }
+        };
+        
+        const canCreateCampaign = computed(() => {
+          if (!subscription.value) return false;
+          return subscription.value.currentCampaignCount < subscription.value.campaignLimit;
+        });
+        
+        const usagePercent = computed(() => {
+          if (!subscription.value) return 0;
+          return (subscription.value.currentCampaignCount / subscription.value.campaignLimit) * 100;
+        });
+        
+        return {
+          subscription,
+          loading,
+          error,
+          canCreateCampaign,
+          usagePercent,
+          fetchSubscription
+        };
+      };
+
+  vanilla_javascript:
+    language: "javascript"
+    framework: "Vanilla JavaScript"
+    code: |
+      // subscription.js - Pure JavaScript
+      class SubscriptionManager {
+        constructor(apiBaseUrl, token) {
+          this.apiBaseUrl = apiBaseUrl;
+          this.token = token;
+          this.subscription = null;
+        }
+        
+        async fetchSubscription() {
+          try {
+            const response = await fetch(`${this.apiBaseUrl}/api/subscription/subscription`, {
+              headers: {
+                'Authorization': `Bearer ${this.token}`
+              }
+            });
+            
+            if (!response.ok) {
+              throw new Error('Failed to fetch subscription');
+            }
+            
+            const data = await response.json();
+            this.subscription = data.subscription;
+            return this.subscription;
+          } catch (error) {
+            console.error('Error fetching subscription:', error);
+            throw error;
+          }
+        }
+        
+        async createCheckoutSession(planName) {
+          try {
+            const response = await fetch(`${this.apiBaseUrl}/api/subscription/checkout`, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${this.token}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                planName: planName,
+                successUrl: window.location.origin + '/subscription/success',
+                cancelUrl: window.location.origin + '/subscription/cancel'
+              })
+            });
+            
+            const data = await response.json();
+            
+            if (data.ok) {
+              window.location.href = data.url;
+            } else {
+              throw new Error(data.error);
+            }
+          } catch (error) {
+            console.error('Error creating checkout session:', error);
+            throw error;
+          }
+        }
+        
+        canCreateCampaign() {
+          if (!this.subscription) return false;
+          return this.subscription.currentCampaignCount < this.subscription.campaignLimit;
+        }
+        
+        renderWidget(containerId) {
+          if (!this.subscription) return;
+          
+          const container = document.getElementById(containerId);
+          const campaignPercent = (this.subscription.currentCampaignCount / this.subscription.campaignLimit) * 100;
+          
+          container.innerHTML = `
+            <div class="subscription-widget">
+              <h3>Plan: ${this.subscription.planName.toUpperCase()}</h3>
+              <div class="progress-bar">
+                <div class="progress-fill" style="width: ${campaignPercent}%"></div>
+              </div>
+              <p>${this.subscription.currentCampaignCount} / ${this.subscription.campaignLimit} campaigns</p>
+              ${!this.canCreateCampaign() ? '<button onclick="upgradeNow()">Upgrade</button>' : ''}
+            </div>
+          `;
+        }
+      }
+
+      // Usage
+      const token = localStorage.getItem('authToken');
+      const subManager = new SubscriptionManager('http://localhost:5000', token);
+
+      subManager.fetchSubscription().then(() => {
+        subManager.renderWidget('subscription-container');
+      });
+
+# ============================================================
+# STEP 9: TESTING
+# ============================================================
+testing:
+  stripe_test_cards:
+    successful_payment:
+      card_number: "4242 4242 4242 4242"
+      expiry: "Any future date"
+      cvc: "Any 3 digits"
+      zip: "Any valid ZIP"
+
+    payment_declined:
+      card_number: "4000 0000 0000 0002"
+      description: "Payment will be declined"
+
+    requires_authentication:
+      card_number: "4000 0025 0000 3155"
+      description: "Requires 3D Secure authentication"
+
+  test_scenarios:
+    scenario_1_new_user_free_tier:
+      steps:
+        - action: "Register new user"
+          endpoint: "POST /api/auth/register"
+        - action: "Login"
+          endpoint: "POST /api/auth/login"
+        - action: "Create first campaign"
+          endpoint: "POST /api/alpha/campaigns"
+          expected: "Success - Free tier auto-created"
+        - action: "Try to create second campaign"
+          endpoint: "POST /api/alpha/campaigns"
+          expected: "403 Error - Campaign limit reached"
+        - action: "Check subscription"
+          endpoint: "GET /api/subscription/subscription"
+          expected: "planName: 'free', campaignLimit: 1"
+
+    scenario_2_upgrade_flow:
+      steps:
+        - action: "User at campaign limit"
+          state: "Free tier, 1/1 campaigns"
+        - action: "Click upgrade button"
+          ui_action: "Open upgrade modal"
+        - action: "Select Growth plan"
+          endpoint: "POST /api/subscription/checkout"
+        - action: "Redirected to Stripe"
+          external: "Stripe Checkout page"
+        - action: "Complete payment"
+          test_card: "4242 4242 4242 4242"
+        - action: "Redirected back"
+          url: "successUrl from checkout request"
+        - action: "Webhook fires"
+          backend: "Subscription synced automatically"
+        - action: "Create new campaign"
+          endpoint: "POST /api/alpha/campaigns"
+          expected: "Success - Now has Growth plan (3 campaigns)"
+
+    scenario_3_cancel_subscription:
+      steps:
+        - action: "User on paid plan"
+          state: "Growth plan, active"
+        - action: "Click cancel subscription"
+          endpoint: "POST /api/subscription/cancel"
+        - action: "Subscription marked for cancellation"
+          expected: "cancelAtPeriodEnd: true"
+        - action: "User changes mind"
+          endpoint: "POST /api/subscription/reactivate"
+        - action: "Subscription reactivated"
+          expected: "cancelAtPeriodEnd: false"
+
+# ============================================================
+# STEP 10: DEPLOYMENT & PRODUCTION
+# ============================================================
+deployment:
+  environment_variables:
+    development:
+      api_url: "http://localhost:5000"
+      stripe_mode: "test"
+
+    production:
+      api_url: "https://api.trafficbox.com"
+      stripe_mode: "live"
+      note: "Backend must have production Stripe keys configured"
+
+  cors_configuration:
+    note: "Ensure backend allows requests from your frontend domain"
+    example: "If frontend is at https://app.trafficbox.com, backend must allow this origin"
+
+  success_redirect_pages:
+    success_page:
+      route: "/subscription/success"
+      actions:
+        - "Show success message"
+        - "Fetch updated subscription"
+        - "Redirect to dashboard after 3 seconds"
+      example_message: "🎉 Payment successful! Your subscription has been upgraded."
+
+    cancel_page:
+      route: "/subscription/cancel"
+      actions:
+        - "Show cancellation message"
+        - "Offer to try different plan"
+        - "Link back to pricing page"
+      example_message: "Payment was canceled. You can try again anytime!"
+
+  monitoring:
+    track_events:
+      - "checkout_initiated"
+      - "checkout_completed"
+      - "checkout_canceled"
+      - "subscription_upgraded"
+      - "subscription_canceled"
+      - "campaign_creation_blocked"
+      - "upgrade_modal_shown"
+
+    analytics_integration:
+      google_analytics: "Track subscription events"
+      mixpanel: "Track user journey through upgrade flow"
+      sentry: "Track errors during checkout process"
+
+# ============================================================
+# QUICK REFERENCE
+# ============================================================
+quick_reference:
+  key_endpoints:
+    authentication:
+      - "POST /api/auth/register - Register user"
+      - "POST /api/auth/login - Login user"
+
+    subscription:
+      - "GET /api/subscription/subscription - Current subscription"
+      - "GET /api/subscription/plans - All plans"
+      - "POST /api/subscription/checkout - Create checkout"
+      - "POST /api/subscription/upgrade - Upgrade plan"
+      - "POST /api/subscription/cancel - Cancel subscription"
+
+    campaigns:
+      - "POST /api/alpha/campaigns - Create campaign (protected)"
+
+  subscription_plans:
+    free:
+      price: "$0"
+      campaigns: 1
+      visits: "1,000"
+
+    starter:
+      price: "$49"
+      campaigns: 2
+      visits: "50,000"
+
+    growth:
+      price: "$199"
+      campaigns: 3
+      visits: "250,000"
+
+    business:
+      price: "$349"
+      campaigns: 5
+      visits: "500,000"
+
+    premium:
+      price: "$599"
+      campaigns: 10
+      visits: "1,000,000"
+
+  common_http_status_codes:
+    200: "Success"
+    400: "Bad request (invalid data)"
+    401: "Unauthorized (login required)"
+    403: "Forbidden (limit reached or subscription inactive)"
+    404: "Not found"
+    500: "Server error"
+
+# ============================================================
+# SUPPORT & RESOURCES
+# ============================================================
+support:
+  documentation:
+    - file: "STRIPE_INTEGRATION_GUIDE.md"
+      description: "Complete backend integration guide"
+    - file: "STRIPE_API_REFERENCE.md"
+      description: "API reference with cURL examples"
+    - file: "stripe-frontend-integration.yml"
+      description: "This file - Frontend developer guide"
+
+  external_resources:
+    - name: "Stripe Checkout Documentation"
+      url: "https://stripe.com/docs/payments/checkout"
+    - name: "Stripe Test Cards"
+      url: "https://stripe.com/docs/testing"
+    - name: "JWT Authentication Guide"
+      url: "https://jwt.io/introduction"
+
+  contact:
+    backend_team: "For API issues or backend questions"
+    stripe_support: "For payment or Stripe-specific issues"
+    documentation: "Check markdown files in repository"
+
+# ============================================================
+# NOTES
+# ============================================================
+notes:
+  important:
+    - "Always store JWT token securely (httpOnly cookie or encrypted localStorage)"
+    - "Refresh subscription data after campaign creation or upgrade"
+    - "Handle 403 errors gracefully with upgrade prompts"
+    - "Use Stripe test cards in development environment"
+    - "Webhook handles subscription sync automatically - no manual refresh needed after checkout"
+
+  best_practices:
+    - "Cache subscription data but refresh on important actions"
+    - "Show loading states during API calls"
+    - "Display clear error messages to users"
+    - "Implement retry logic for failed requests"
+    - "Track analytics events for subscription flow"
+    - "Test with different subscription states"
+    - "Handle edge cases (expired tokens, network errors, etc.)"
+
+  security:
+    - "Never expose Stripe secret keys in frontend code"
+    - "Always use HTTPS in production"
+    - "Validate JWT token expiration"
+    - "Implement CSRF protection if using cookies"
+    - "Rate limit API calls to prevent abuse"
+
+# ============================================================
+# END OF DOCUMENTATION
+# ============================================================
+version: "1.0.0"
+last_updated: "2026-01-03"
+maintainer: "TrafficBox Backend Team"
