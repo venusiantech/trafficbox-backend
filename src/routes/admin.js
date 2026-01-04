@@ -200,16 +200,16 @@ router.put("/users/:userId/credits", requireRole("admin"), async (req, res) => {
 
     // Validate input
     if (credits === undefined || credits === null) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: "Credits or amount is required",
-        example: { "amount": 1000, "action": "add" }
+        example: { amount: 1000, action: "add" },
       });
     }
 
     if (!["add", "subtract", "set"].includes(action)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: "Action must be 'add', 'subtract', or 'set'",
-        receivedAction: action
+        receivedAction: action,
       });
     }
 
@@ -262,124 +262,137 @@ router.put("/users/:userId/credits", requireRole("admin"), async (req, res) => {
 });
 
 // Transfer Alpha Campaign from one user to another (MUST be before the pause/resume route)
-router.post("/campaigns/:campaignId/transfer", requireRole("admin"), async (req, res) => {
-  try {
-    const { campaignId } = req.params;
-    const { targetUserId, reason } = req.body;
+router.post(
+  "/campaigns/:campaignId/transfer",
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const { campaignId } = req.params;
+      const { targetUserId, reason } = req.body;
 
-    // Validate required fields
-    if (!targetUserId) {
-      return res.status(400).json({
-        status: "error",
-        message: "Target user ID is required"
+      // Validate required fields
+      if (!targetUserId) {
+        return res.status(400).json({
+          status: "error",
+          message: "Target user ID is required",
+        });
+      }
+
+      // Find the campaign
+      const campaign = await Campaign.findById(campaignId).populate(
+        "user",
+        "email firstName lastName"
+      );
+      if (!campaign) {
+        return res.status(404).json({
+          status: "error",
+          message: "Campaign not found",
+        });
+      }
+
+      // Check if it's an Alpha campaign
+      if (!campaign.spark_traffic_project_id) {
+        return res.status(400).json({
+          status: "error",
+          message: "Only Alpha (SparkTraffic) campaigns can be transferred",
+        });
+      }
+
+      // Find target user
+      const targetUser = await User.findById(targetUserId).select(
+        "email firstName lastName credits availableHits"
+      );
+      if (!targetUser) {
+        return res.status(404).json({
+          status: "error",
+          message: "Target user not found",
+        });
+      }
+
+      // Find source user
+      const sourceUser = await User.findById(campaign.user).select(
+        "email firstName lastName"
+      );
+
+      // Prevent transferring to the same user
+      if (campaign.user.toString() === targetUserId) {
+        return res.status(400).json({
+          status: "error",
+          message: "Campaign is already owned by this user",
+        });
+      }
+
+      // Store original owner info for logging
+      const originalOwner = {
+        id: campaign.user._id,
+        email: sourceUser.email,
+        name: `${sourceUser.firstName} ${sourceUser.lastName}`.trim(),
+      };
+
+      // Transfer the campaign
+      const oldUserId = campaign.user._id;
+      campaign.user = targetUserId;
+
+      // Add transfer metadata
+      if (!campaign.transfer_history) {
+        campaign.transfer_history = [];
+      }
+
+      campaign.transfer_history.push({
+        from_user: oldUserId,
+        to_user: targetUserId,
+        transferred_by: req.user.id,
+        transferred_at: new Date(),
+        reason: reason || "Admin transfer",
+        admin_email: req.user.email,
       });
-    }
 
-    // Find the campaign
-    const campaign = await Campaign.findById(campaignId).populate("user", "email firstName lastName");
-    if (!campaign) {
-      return res.status(404).json({
-        status: "error",
-        message: "Campaign not found"
-      });
-    }
+      await campaign.save();
 
-    // Check if it's an Alpha campaign
-    if (!campaign.spark_traffic_project_id) {
-      return res.status(400).json({
-        status: "error",
-        message: "Only Alpha (SparkTraffic) campaigns can be transferred"
-      });
-    }
+      // Populate the new owner details
+      await campaign.populate(
+        "user",
+        "email firstName lastName credits availableHits"
+      );
 
-    // Find target user
-    const targetUser = await User.findById(targetUserId).select("email firstName lastName credits availableHits");
-    if (!targetUser) {
-      return res.status(404).json({
-        status: "error",
-        message: "Target user not found"
-      });
-    }
-
-    // Find source user
-    const sourceUser = await User.findById(campaign.user).select("email firstName lastName");
-
-    // Prevent transferring to the same user
-    if (campaign.user.toString() === targetUserId) {
-      return res.status(400).json({
-        status: "error",
-        message: "Campaign is already owned by this user"
-      });
-    }
-
-    // Store original owner info for logging
-    const originalOwner = {
-      id: campaign.user._id,
-      email: sourceUser.email,
-      name: `${sourceUser.firstName} ${sourceUser.lastName}`.trim()
-    };
-
-    // Transfer the campaign
-    const oldUserId = campaign.user._id;
-    campaign.user = targetUserId;
-    
-    // Add transfer metadata
-    if (!campaign.transfer_history) {
-      campaign.transfer_history = [];
-    }
-    
-    campaign.transfer_history.push({
-      from_user: oldUserId,
-      to_user: targetUserId,
-      transferred_by: req.user.id,
-      transferred_at: new Date(),
-      reason: reason || "Admin transfer",
-      admin_email: req.user.email
-    });
-
-    await campaign.save();
-
-    // Populate the new owner details
-    await campaign.populate("user", "email firstName lastName credits availableHits");
-
-    res.json({
-      status: "success",
-      message: "Alpha campaign transferred successfully",
-      transfer: {
-        campaignId: campaign._id,
-        campaignTitle: campaign.title,
-        sparkTrafficProjectId: campaign.spark_traffic_project_id,
-        from: {
-          userId: originalOwner.id,
-          email: originalOwner.email,
-          name: originalOwner.name
+      res.json({
+        status: "success",
+        message: "Alpha campaign transferred successfully",
+        transfer: {
+          campaignId: campaign._id,
+          campaignTitle: campaign.title,
+          sparkTrafficProjectId: campaign.spark_traffic_project_id,
+          from: {
+            userId: originalOwner.id,
+            email: originalOwner.email,
+            name: originalOwner.name,
+          },
+          to: {
+            userId: targetUser._id,
+            email: targetUser.email,
+            name: `${targetUser.firstName} ${targetUser.lastName}`.trim(),
+            credits: targetUser.credits,
+            availableHits: targetUser.availableHits,
+          },
+          transferredBy: {
+            adminId: req.user.id,
+            adminEmail: req.user.email,
+          },
+          transferredAt: new Date(),
+          reason: reason || "Admin transfer",
         },
-        to: {
-          userId: targetUser._id,
-          email: targetUser.email,
-          name: `${targetUser.firstName} ${targetUser.lastName}`.trim(),
-          credits: targetUser.credits,
-          availableHits: targetUser.availableHits
-        },
-        transferredBy: {
-          adminId: req.user.id,
-          adminEmail: req.user.email
-        },
-        transferredAt: new Date(),
-        reason: reason || "Admin transfer"
-      },
-      campaign: campaign
-    });
-
-  } catch (error) {
-    console.error("Error transferring campaign:", error);
-    res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-      error: error.message
-    });
+        campaign: campaign,
+      });
+    } catch (error) {
+      console.error("Error transferring campaign:", error);
+      res.status(500).json({
+        status: "error",
+        message: "Internal server error",
+        error: error.message,
+      });
+    }
   }
-});
+);
 
 // Force Pause/Resume Campaign
 router.post(
@@ -467,39 +480,44 @@ router.post(
 );
 
 // Delete Campaign (Admin Override)
-router.delete("/campaigns/:campaignId", requireRole("admin"), async (req, res) => {
-  try {
-    const campaign = await Campaign.findById(req.params.campaignId).populate(
-      "user",
-      "email firstName lastName"
-    );
-    if (!campaign) return res.status(404).json({ error: "Campaign not found" });
+router.delete(
+  "/campaigns/:campaignId",
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const campaign = await Campaign.findById(req.params.campaignId).populate(
+        "user",
+        "email firstName lastName"
+      );
+      if (!campaign)
+        return res.status(404).json({ error: "Campaign not found" });
 
-    // Try to delete from vendor
-    let vendorResp = null;
-    if (campaign.nine_hits_campaign_id) {
-      try {
-        const nine = require("../services/nineHits");
-        vendorResp = await nine.siteDelete({
-          id: campaign.nine_hits_campaign_id,
-        });
-      } catch (err) {
-        vendorResp = { error: err.message };
+      // Try to delete from vendor
+      let vendorResp = null;
+      if (campaign.nine_hits_campaign_id) {
+        try {
+          const nine = require("../services/nineHits");
+          vendorResp = await nine.siteDelete({
+            id: campaign.nine_hits_campaign_id,
+          });
+        } catch (err) {
+          vendorResp = { error: err.message };
+        }
       }
+
+      await campaign.deleteOne();
+
+      res.json({
+        ok: true,
+        message: "Campaign deleted successfully by admin",
+        deletedCampaign: campaign,
+        vendorResp,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
-
-    await campaign.deleteOne();
-
-    res.json({
-      ok: true,
-      message: "Campaign deleted successfully by admin",
-      deletedCampaign: campaign,
-      vendorResp,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
-});
+);
 
 // System Analytics
 router.get("/analytics", requireRole("admin"), async (req, res) => {
@@ -742,131 +760,533 @@ router.post("/fix-user-hits", requireRole("admin"), async (req, res) => {
 });
 
 // Get transfer history for a campaign
-router.get("/campaigns/:campaignId/transfer-history", requireRole("admin"), async (req, res) => {
-  try {
-    const { campaignId } = req.params;
+router.get(
+  "/campaigns/:campaignId/transfer-history",
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const { campaignId } = req.params;
 
-    const campaign = await Campaign.findById(campaignId)
-      .select("title spark_traffic_project_id transfer_history user")
-      .populate("user", "email firstName lastName");
+      const campaign = await Campaign.findById(campaignId)
+        .select("title spark_traffic_project_id transfer_history user")
+        .populate("user", "email firstName lastName");
 
-    if (!campaign) {
-      return res.status(404).json({
-        status: "error",
-        message: "Campaign not found"
-      });
-    }
-
-    if (!campaign.spark_traffic_project_id) {
-      return res.status(400).json({
-        status: "error",
-        message: "Only Alpha campaigns have transfer history"
-      });
-    }
-
-    // Populate transfer history with user details
-    const transferHistory = [];
-    if (campaign.transfer_history && campaign.transfer_history.length > 0) {
-      for (const transfer of campaign.transfer_history) {
-        const [fromUser, toUser, adminUser] = await Promise.all([
-          User.findById(transfer.from_user).select("email firstName lastName"),
-          User.findById(transfer.to_user).select("email firstName lastName"),
-          User.findById(transfer.transferred_by).select("email firstName lastName")
-        ]);
-
-        transferHistory.push({
-          from: fromUser ? {
-            id: fromUser._id,
-            email: fromUser.email,
-            name: `${fromUser.firstName} ${fromUser.lastName}`.trim()
-          } : { id: transfer.from_user, email: "User not found", name: "Unknown" },
-          to: toUser ? {
-            id: toUser._id,
-            email: toUser.email,
-            name: `${toUser.firstName} ${toUser.lastName}`.trim()
-          } : { id: transfer.to_user, email: "User not found", name: "Unknown" },
-          transferredBy: adminUser ? {
-            id: adminUser._id,
-            email: adminUser.email,
-            name: `${adminUser.firstName} ${adminUser.lastName}`.trim()
-          } : { id: transfer.transferred_by, email: "Admin not found", name: "Unknown" },
-          transferredAt: transfer.transferred_at,
-          reason: transfer.reason || "No reason provided"
+      if (!campaign) {
+        return res.status(404).json({
+          status: "error",
+          message: "Campaign not found",
         });
       }
-    }
 
-    res.json({
-      status: "success",
-      campaign: {
-        id: campaign._id,
-        title: campaign.title,
-        sparkTrafficProjectId: campaign.spark_traffic_project_id,
-        currentOwner: {
-          id: campaign.user._id,
-          email: campaign.user.email,
-          name: `${campaign.user.firstName} ${campaign.user.lastName}`.trim()
+      if (!campaign.spark_traffic_project_id) {
+        return res.status(400).json({
+          status: "error",
+          message: "Only Alpha campaigns have transfer history",
+        });
+      }
+
+      // Populate transfer history with user details
+      const transferHistory = [];
+      if (campaign.transfer_history && campaign.transfer_history.length > 0) {
+        for (const transfer of campaign.transfer_history) {
+          const [fromUser, toUser, adminUser] = await Promise.all([
+            User.findById(transfer.from_user).select(
+              "email firstName lastName"
+            ),
+            User.findById(transfer.to_user).select("email firstName lastName"),
+            User.findById(transfer.transferred_by).select(
+              "email firstName lastName"
+            ),
+          ]);
+
+          transferHistory.push({
+            from: fromUser
+              ? {
+                  id: fromUser._id,
+                  email: fromUser.email,
+                  name: `${fromUser.firstName} ${fromUser.lastName}`.trim(),
+                }
+              : {
+                  id: transfer.from_user,
+                  email: "User not found",
+                  name: "Unknown",
+                },
+            to: toUser
+              ? {
+                  id: toUser._id,
+                  email: toUser.email,
+                  name: `${toUser.firstName} ${toUser.lastName}`.trim(),
+                }
+              : {
+                  id: transfer.to_user,
+                  email: "User not found",
+                  name: "Unknown",
+                },
+            transferredBy: adminUser
+              ? {
+                  id: adminUser._id,
+                  email: adminUser.email,
+                  name: `${adminUser.firstName} ${adminUser.lastName}`.trim(),
+                }
+              : {
+                  id: transfer.transferred_by,
+                  email: "Admin not found",
+                  name: "Unknown",
+                },
+            transferredAt: transfer.transferred_at,
+            reason: transfer.reason || "No reason provided",
+          });
         }
-      },
-      transferHistory: transferHistory
-    });
+      }
 
-  } catch (error) {
-    console.error("Error fetching transfer history:", error);
-    res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-      error: error.message
-    });
+      res.json({
+        status: "success",
+        campaign: {
+          id: campaign._id,
+          title: campaign.title,
+          sparkTrafficProjectId: campaign.spark_traffic_project_id,
+          currentOwner: {
+            id: campaign.user._id,
+            email: campaign.user.email,
+            name: `${campaign.user.firstName} ${campaign.user.lastName}`.trim(),
+          },
+        },
+        transferHistory: transferHistory,
+      });
+    } catch (error) {
+      console.error("Error fetching transfer history:", error);
+      res.status(500).json({
+        status: "error",
+        message: "Internal server error",
+        error: error.message,
+      });
+    }
   }
-});
+);
 
 // Get all Alpha campaigns for transfer management
-router.get("/campaigns/alpha/transferable", requireRole("admin"), async (req, res) => {
+router.get(
+  "/campaigns/alpha/transferable",
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 20;
+      const skip = (page - 1) * limit;
+
+      // Find all Alpha campaigns
+      const [campaigns, totalCampaigns] = await Promise.all([
+        Campaign.find({
+          spark_traffic_project_id: { $exists: true, $ne: null },
+        })
+          .populate("user", "email firstName lastName credits availableHits")
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(limit),
+        Campaign.countDocuments({
+          spark_traffic_project_id: { $exists: true, $ne: null },
+        }),
+      ]);
+
+      // Add transfer count to each campaign
+      const campaignsWithTransferInfo = campaigns.map((campaign) => ({
+        ...campaign.toObject(),
+        transferCount: campaign.transfer_history
+          ? campaign.transfer_history.length
+          : 0,
+        lastTransfer:
+          campaign.transfer_history && campaign.transfer_history.length > 0
+            ? campaign.transfer_history[campaign.transfer_history.length - 1]
+                .transferred_at
+            : null,
+      }));
+
+      res.json({
+        status: "success",
+        campaigns: campaignsWithTransferInfo,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(totalCampaigns / limit),
+          totalCampaigns,
+          hasNext: page * limit < totalCampaigns,
+          hasPrev: page > 1,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching transferable campaigns:", error);
+      res.status(500).json({
+        status: "error",
+        message: "Internal server error",
+        error: error.message,
+      });
+    }
+  }
+);
+
+// ============================================================
+// SUBSCRIPTION MANAGEMENT BY ADMIN
+// ============================================================
+
+// Assign or Update User Subscription
+router.post(
+  "/users/:userId/subscription",
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { planName, reason } = req.body;
+
+      // Validate plan name
+      const validPlans = ["free", "starter", "growth", "business", "premium"];
+      if (!planName || !validPlans.includes(planName)) {
+        return res.status(400).json({
+          error: "Invalid plan name",
+          validPlans: validPlans,
+          received: planName,
+        });
+      }
+
+      // Find user
+      const user = await User.findById(userId).select("-password");
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      // Get plan configuration
+      const Subscription = require("../models/Subscription");
+      const planConfig = Subscription.getPlanConfig(planName);
+
+      // Find or create subscription
+      let subscription = await Subscription.findOne({ user: userId });
+      const isNewSubscription = !subscription;
+
+      if (!subscription) {
+        // Create new subscription
+        subscription = new Subscription({
+          user: userId,
+          stripeCustomerId: user.stripeCustomerId || `admin_assigned_${userId}`,
+          planName: planName,
+          status: "active",
+          visitsIncluded: planConfig.visitsIncluded,
+          campaignLimit: planConfig.campaignLimit,
+          visitsUsed: 0,
+          features: planConfig.features,
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+          adminAssigned: true,
+          assignedBy: req.user.id,
+          assignedAt: new Date(),
+          assignmentReason: reason || "Admin assignment",
+        });
+      } else {
+        // Update existing subscription
+        const oldPlan = subscription.planName;
+
+        subscription.planName = planName;
+        subscription.status = "active";
+        subscription.visitsIncluded = planConfig.visitsIncluded;
+        subscription.campaignLimit = planConfig.campaignLimit;
+        subscription.features = planConfig.features;
+        subscription.adminAssigned = true;
+        subscription.lastModifiedBy = req.user.id;
+        subscription.lastModifiedAt = new Date();
+        subscription.modificationReason =
+          reason || `Admin changed plan from ${oldPlan} to ${planName}`;
+
+        // Reset period if switching plans
+        subscription.currentPeriodStart = new Date();
+        subscription.currentPeriodEnd = new Date(
+          Date.now() + 365 * 24 * 60 * 60 * 1000
+        );
+
+        // Optionally reset visits for new period (keep this if you want to reset on plan change)
+        // subscription.visitsUsed = 0;
+      }
+
+      await subscription.save();
+
+      // Count current campaigns
+      const Campaign = require("../models/Campaign");
+      const currentCampaigns = await Campaign.countDocuments({
+        user: userId,
+        $or: [{ is_archived: { $exists: false } }, { is_archived: false }],
+      });
+
+      res.json({
+        ok: true,
+        message: isNewSubscription
+          ? `Subscription assigned successfully to ${user.email}`
+          : `Subscription updated successfully for ${user.email}`,
+        action: isNewSubscription ? "created" : "updated",
+        subscription: {
+          planName: subscription.planName,
+          status: subscription.status,
+          visitsIncluded: subscription.visitsIncluded,
+          visitsUsed: subscription.visitsUsed,
+          campaignLimit: subscription.campaignLimit,
+          currentCampaigns: currentCampaigns,
+          features: subscription.features,
+          currentPeriodStart: subscription.currentPeriodStart,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+          adminAssigned: true,
+          assignedBy: req.user.email,
+          reason:
+            reason || (isNewSubscription ? "Admin assignment" : "Admin update"),
+        },
+        user: {
+          id: user._id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        },
+      });
+    } catch (error) {
+      console.error("Error assigning subscription:", error);
+      res.status(500).json({
+        error: "Failed to assign subscription",
+        details: error.message,
+      });
+    }
+  }
+);
+
+// Get User's Subscription Details (Admin view)
+router.get(
+  "/users/:userId/subscription",
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      const user = await User.findById(userId).select("-password");
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const Subscription = require("../models/Subscription");
+      const subscription = await Subscription.findOne({ user: userId });
+
+      if (!subscription) {
+        return res.json({
+          ok: true,
+          message: "User has no subscription",
+          user: {
+            id: user._id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+          },
+          subscription: null,
+          suggestion:
+            "Use POST /admin/users/:userId/subscription to assign a plan",
+        });
+      }
+
+      // Count current campaigns
+      const Campaign = require("../models/Campaign");
+      const currentCampaigns = await Campaign.countDocuments({
+        user: userId,
+        $or: [{ is_archived: { $exists: false } }, { is_archived: false }],
+      });
+
+      res.json({
+        ok: true,
+        user: {
+          id: user._id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          stripeCustomerId: user.stripeCustomerId,
+        },
+        subscription: {
+          id: subscription._id,
+          planName: subscription.planName,
+          status: subscription.status,
+          visitsIncluded: subscription.visitsIncluded,
+          visitsUsed: subscription.visitsUsed,
+          campaignLimit: subscription.campaignLimit,
+          currentCampaigns: currentCampaigns,
+          features: subscription.features,
+          currentPeriodStart: subscription.currentPeriodStart,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+          cancelAtPeriodEnd: subscription.cancelAtPeriodEnd,
+          stripeSubscriptionId: subscription.stripeSubscriptionId,
+          stripePriceId: subscription.stripePriceId,
+          adminAssigned: subscription.adminAssigned || false,
+          assignedBy: subscription.assignedBy,
+          assignedAt: subscription.assignedAt,
+          lastModifiedBy: subscription.lastModifiedBy,
+          lastModifiedAt: subscription.lastModifiedAt,
+          createdAt: subscription.createdAt,
+          updatedAt: subscription.updatedAt,
+        },
+      });
+    } catch (error) {
+      console.error("Error fetching subscription:", error);
+      res.status(500).json({
+        error: "Failed to fetch subscription",
+        details: error.message,
+      });
+    }
+  }
+);
+
+// Get All Users with Subscriptions
+router.get("/subscriptions", requireRole("admin"), async (req, res) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
+    const planFilter = req.query.plan; // Filter by plan name
 
-    // Find all Alpha campaigns
-    const [campaigns, totalCampaigns] = await Promise.all([
-      Campaign.find({ spark_traffic_project_id: { $exists: true, $ne: null } })
+    const Subscription = require("../models/Subscription");
+    const Campaign = require("../models/Campaign");
+
+    let filter = {};
+    if (planFilter) {
+      filter.planName = planFilter;
+    }
+
+    const [subscriptions, totalSubscriptions] = await Promise.all([
+      Subscription.find(filter)
         .populate("user", "email firstName lastName credits availableHits")
-        .sort({ createdAt: -1 })
+        .sort({ updatedAt: -1 })
         .skip(skip)
         .limit(limit),
-      Campaign.countDocuments({ spark_traffic_project_id: { $exists: true, $ne: null } })
+      Subscription.countDocuments(filter),
     ]);
 
-    // Add transfer count to each campaign
-    const campaignsWithTransferInfo = campaigns.map(campaign => ({
-      ...campaign.toObject(),
-      transferCount: campaign.transfer_history ? campaign.transfer_history.length : 0,
-      lastTransfer: campaign.transfer_history && campaign.transfer_history.length > 0 
-        ? campaign.transfer_history[campaign.transfer_history.length - 1].transferred_at
-        : null
-    }));
+    // Get campaign counts for each user
+    const subscriptionsWithCampaigns = await Promise.all(
+      subscriptions.map(async (sub) => {
+        const campaignCount = await Campaign.countDocuments({
+          user: sub.user._id,
+          $or: [{ is_archived: { $exists: false } }, { is_archived: false }],
+        });
+
+        return {
+          subscriptionId: sub._id,
+          planName: sub.planName,
+          status: sub.status,
+          visitsIncluded: sub.visitsIncluded,
+          visitsUsed: sub.visitsUsed,
+          campaignLimit: sub.campaignLimit,
+          currentCampaigns: campaignCount,
+          adminAssigned: sub.adminAssigned || false,
+          currentPeriodStart: sub.currentPeriodStart,
+          currentPeriodEnd: sub.currentPeriodEnd,
+          cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
+          user: {
+            id: sub.user._id,
+            email: sub.user.email,
+            name: `${sub.user.firstName} ${sub.user.lastName}`.trim(),
+            credits: sub.user.credits,
+            availableHits: sub.user.availableHits,
+          },
+        };
+      })
+    );
+
+    // Get plan distribution stats
+    const planStats = await Subscription.aggregate([
+      { $group: { _id: "$planName", count: { $sum: 1 } } },
+      { $sort: { _id: 1 } },
+    ]);
 
     res.json({
-      status: "success",
-      campaigns: campaignsWithTransferInfo,
+      ok: true,
+      subscriptions: subscriptionsWithCampaigns,
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil(totalCampaigns / limit),
-        totalCampaigns,
-        hasNext: page * limit < totalCampaigns,
-        hasPrev: page > 1
-      }
+        totalPages: Math.ceil(totalSubscriptions / limit),
+        totalSubscriptions,
+        hasNext: page * limit < totalSubscriptions,
+        hasPrev: page > 1,
+      },
+      planDistribution: planStats,
+      filter: planFilter ? { plan: planFilter } : null,
     });
-
   } catch (error) {
-    console.error("Error fetching transferable campaigns:", error);
+    console.error("Error fetching subscriptions:", error);
     res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-      error: error.message
+      error: "Failed to fetch subscriptions",
+      details: error.message,
     });
   }
 });
+
+// Delete User's Subscription (Reset to free tier)
+router.delete(
+  "/users/:userId/subscription",
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { reason } = req.body;
+
+      const user = await User.findById(userId).select("-password");
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const Subscription = require("../models/Subscription");
+      const subscription = await Subscription.findOne({ user: userId });
+
+      if (!subscription) {
+        return res.json({
+          ok: true,
+          message: "User has no subscription to delete",
+          user: {
+            email: user.email,
+          },
+        });
+      }
+
+      const oldPlan = subscription.planName;
+
+      // Reset to free plan instead of deleting
+      const planConfig = Subscription.getPlanConfig("free");
+      subscription.planName = "free";
+      subscription.status = "active";
+      subscription.visitsIncluded = planConfig.visitsIncluded;
+      subscription.campaignLimit = planConfig.campaignLimit;
+      subscription.features = planConfig.features;
+      subscription.visitsUsed = 0;
+      subscription.stripeSubscriptionId = null;
+      subscription.stripePriceId = null;
+      subscription.adminAssigned = true;
+      subscription.lastModifiedBy = req.user.id;
+      subscription.lastModifiedAt = new Date();
+      subscription.modificationReason =
+        reason || `Admin reset from ${oldPlan} to free plan`;
+
+      await subscription.save();
+
+      res.json({
+        ok: true,
+        message: `Subscription reset to free tier for ${user.email}`,
+        previousPlan: oldPlan,
+        newPlan: "free",
+        subscription: {
+          planName: subscription.planName,
+          status: subscription.status,
+          visitsIncluded: subscription.visitsIncluded,
+          campaignLimit: subscription.campaignLimit,
+          features: subscription.features,
+        },
+        user: {
+          id: user._id,
+          email: user.email,
+        },
+      });
+    } catch (error) {
+      console.error("Error resetting subscription:", error);
+      res.status(500).json({
+        error: "Failed to reset subscription",
+        details: error.message,
+      });
+    }
+  }
+);
 
 module.exports = router;

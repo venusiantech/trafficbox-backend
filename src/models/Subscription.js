@@ -141,6 +141,32 @@ const subscriptionSchema = new mongoose.Schema(
     metadata: {
       type: mongoose.Schema.Types.Mixed,
     },
+
+    // Admin assignment tracking
+    adminAssigned: {
+      type: Boolean,
+      default: false,
+    },
+    assignedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    assignedAt: {
+      type: Date,
+    },
+    assignmentReason: {
+      type: String,
+    },
+    lastModifiedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    lastModifiedAt: {
+      type: Date,
+    },
+    modificationReason: {
+      type: String,
+    },
   },
   { timestamps: true }
 );
