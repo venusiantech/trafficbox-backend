@@ -310,6 +310,14 @@ async function updateSubscriptionPlan(userId, newPlanName) {
 async function getSubscriptionDetails(userId) {
   try {
     const subscription = await Subscription.findOne({ user: userId });
+    
+    // Calculate real-time campaign count (excluding archived campaigns)
+    const Campaign = require("../models/Campaign");
+    const currentCampaignCount = await Campaign.countDocuments({
+      user: userId,
+      $or: [{ is_archived: { $exists: false } }, { is_archived: false }],
+    });
+    
     if (!subscription) {
       // Return free plan details if no subscription exists
       const freePlan = Subscription.getPlanConfig("free");
@@ -317,10 +325,14 @@ async function getSubscriptionDetails(userId) {
         planName: "free",
         status: "active",
         ...freePlan,
-        currentCampaignCount: 0,
+        currentCampaignCount,
         visitsUsed: 0,
       };
     }
+
+    // Update the subscription record with current campaign count
+    subscription.currentCampaignCount = currentCampaignCount;
+    await subscription.save();
 
     return subscription;
   } catch (error) {
