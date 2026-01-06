@@ -272,7 +272,7 @@ subscriptionSchema.statics.getPlanConfig = function (planName) {
     },
     premium: {
       planName: "premium",
-      visitsIncluded: 1000000,
+      visitsIncluded: 10000000,
       campaignLimit: 10,
       price: 599,
       features: {

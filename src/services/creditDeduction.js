@@ -3,6 +3,7 @@ const http = require("http");
 const https = require("https");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
+const Subscription = require("../models/Subscription");
 const logger = require("../utils/logger");
 
 // Reusable axios instance with keep-alive to reduce socket churn
@@ -394,6 +395,50 @@ async function processCampaignCredits(campaign) {
 
       await campaign.user.save();
 
+      // Also deduct visits from subscription table
+      try {
+        const subscription = await Subscription.findOne({ user: campaign.user._id });
+        if (subscription) {
+
+          // Check if user has enough visits in subscription
+          if (subscription.visitsUsed + actualNewHits > subscription.visitsIncluded) {
+            logger.warn("Subscription visit limit would be exceeded", {
+              campaignId: campaign._id,
+              userId: campaign.user._id,
+              userEmail: campaign.user.email,
+              currentVisitsUsed: subscription.visitsUsed,
+              visitsIncluded: subscription.visitsIncluded,
+              newHits: actualNewHits,
+            });
+          }
+
+          // Deduct visits from subscription (even if it goes over limit for tracking)
+          subscription.visitsUsed += actualNewHits;
+          await subscription.save();
+
+          logger.info("Visits deducted from subscription", {
+            campaignId: campaign._id,
+            userId: campaign.user._id,
+            visitsDeducted: actualNewHits,
+            totalVisitsUsed: subscription.visitsUsed,
+            visitsIncluded: subscription.visitsIncluded,
+          });
+        } else {
+          logger.warn("No subscription found for user", {
+            campaignId: campaign._id,
+            userId: campaign.user._id,
+            userEmail: campaign.user.email,
+          });
+        }
+      } catch (subscriptionError) {
+        logger.error("Failed to deduct visits from subscription", {
+          campaignId: campaign._id,
+          userId: campaign.user._id,
+          error: subscriptionError.message,
+        });
+        // Don't throw error here to avoid breaking credit deduction
+      }
+
       // Check if credits went below zero and pause campaign if so
       if (campaign.user.credits < 0) {
         logger.warn("User credits went below zero, pausing campaign", {
@@ -457,7 +502,7 @@ async function processCampaignCredits(campaign) {
         creditsDeducted: creditsToDeduct,
         hitsDeducted: actualNewHits,
         newHits: actualNewHits,
-        message: `Deducted ${creditsToDeduct} credits and ${actualNewHits} hits for ${actualNewHits} new traffic hits`,
+        message: `Deducted ${creditsToDeduct} credits, ${actualNewHits} hits, and ${actualNewHits} subscription visits for ${actualNewHits} new traffic hits`,
       };
     } else {
       // No new hits, just update the check time
