@@ -376,7 +376,7 @@ router.post(
 });
 
 // AI: Generate SEO analysis (authenticated users)
-router.post("/ai/seo-analysis", authenticateJWT, async (req, res) => {
+router.post("/ai/seo-analysis", async (req, res) => {
   try {
     const axios = require("axios");
     const API_BASE = process.env.BLOG_AI_BASE_URL || "https://backend.aaddyy.com";
