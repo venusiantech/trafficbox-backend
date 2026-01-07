@@ -375,13 +375,17 @@ router.post(
           const session = event.data.object;
           if (session.mode === "subscription") {
             const subscriptionId = session.subscription;
+            const userId = session.metadata?.userId; // Get userId from session metadata
             const stripeSubscription =
               await stripe.subscriptions.retrieve(subscriptionId);
-            await syncSubscriptionFromStripe(stripeSubscription);
+            
+            // Pass userId to sync function to ensure proper user association
+            await syncSubscriptionFromStripe(stripeSubscription, userId);
 
             logger.info("Subscription created from checkout", {
               sessionId: session.id,
               subscriptionId,
+              userId,
             });
           }
           break;

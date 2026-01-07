@@ -41,11 +41,25 @@ async function syncSubscriptionFromStripe(stripeSubscription, userId = null) {
     if (userId) {
       user = await User.findById(userId);
     } else {
+      // First try to find user through existing subscription
       const subscription = await Subscription.findOne({
         stripeCustomerId: stripeSubscription.customer,
       });
       if (subscription) {
         user = await User.findById(subscription.user);
+      } else {
+        // Fallback: Get user ID from Stripe customer metadata
+        try {
+          const stripeCustomer = await stripe.customers.retrieve(stripeSubscription.customer);
+          if (stripeCustomer.metadata?.userId) {
+            user = await User.findById(stripeCustomer.metadata.userId);
+          }
+        } catch (error) {
+          logger.error("Failed to retrieve Stripe customer", {
+            stripeCustomerId: stripeSubscription.customer,
+            error: error.message,
+          });
+        }
       }
     }
 
@@ -120,7 +134,7 @@ async function syncSubscriptionFromStripe(stripeSubscription, userId = null) {
  */
 function mapPriceIdToPlan(priceId) {
   const priceIdMap = {
-    // Replace these with your actual Stripe price IDs
+    // Environment variable mapping (preferred)
     [process.env.STRIPE_PRICE_FREE]: "free",
     [process.env.STRIPE_PRICE_STARTER]: "starter",
     [process.env.STRIPE_PRICE_GROWTH]: "growth",
@@ -150,6 +164,12 @@ async function createCheckoutSession(userId, planName, successUrl, cancelUrl) {
     } else {
       const customer = await createStripeCustomer(user);
       stripeCustomerId = customer.id;
+      
+      // Save the customer ID to the subscription record if it exists
+      if (subscription) {
+        subscription.stripeCustomerId = stripeCustomerId;
+        await subscription.save();
+      }
     }
 
     // Get price ID for the plan
@@ -199,6 +219,7 @@ async function createCheckoutSession(userId, planName, successUrl, cancelUrl) {
  */
 function getPriceIdForPlan(planName) {
   const planPriceMap = {
+    // Environment variable mapping (preferred)
     free: process.env.STRIPE_PRICE_FREE,
     starter: process.env.STRIPE_PRICE_STARTER,
     growth: process.env.STRIPE_PRICE_GROWTH,
