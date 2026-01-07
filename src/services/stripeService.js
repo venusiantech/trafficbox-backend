@@ -98,15 +98,46 @@ async function syncSubscriptionFromStripe(stripeSubscription, userId = null) {
     subscription.visitsIncluded = planConfig.visitsIncluded;
     subscription.campaignLimit = planConfig.campaignLimit;
     subscription.features = planConfig.features;
-    subscription.currentPeriodStart = new Date(
-      stripeSubscription.current_period_start * 1000
-    );
-    subscription.currentPeriodEnd = new Date(
-      stripeSubscription.current_period_end * 1000
-    );
-    subscription.cancelAtPeriodEnd = stripeSubscription.cancel_at_period_end;
-    subscription.canceledAt = stripeSubscription.canceled_at
-      ? new Date(stripeSubscription.canceled_at * 1000)
+    // Safely convert Stripe timestamps to Date objects with validation
+    const startTimestamp = stripeSubscription.current_period_start;
+    const endTimestamp = stripeSubscription.current_period_end;
+    const canceledTimestamp = stripeSubscription.canceled_at;
+
+    // Log timestamp values for debugging
+    logger.debug("Processing subscription timestamps", {
+      startTimestamp,
+      endTimestamp,
+      canceledTimestamp,
+      subscriptionId: stripeSubscription.id,
+    });
+
+    subscription.currentPeriodStart = startTimestamp && !isNaN(startTimestamp)
+      ? new Date(startTimestamp * 1000)
+      : new Date();
+    
+    subscription.currentPeriodEnd = endTimestamp && !isNaN(endTimestamp)
+      ? new Date(endTimestamp * 1000)
+      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // Default to 30 days from now
+    
+    // Validate that the dates are actually valid
+    if (isNaN(subscription.currentPeriodStart.getTime())) {
+      logger.warn("Invalid currentPeriodStart date, using fallback", {
+        originalTimestamp: startTimestamp,
+        subscriptionId: stripeSubscription.id,
+      });
+      subscription.currentPeriodStart = new Date();
+    }
+    if (isNaN(subscription.currentPeriodEnd.getTime())) {
+      logger.warn("Invalid currentPeriodEnd date, using fallback", {
+        originalTimestamp: endTimestamp,
+        subscriptionId: stripeSubscription.id,
+      });
+      subscription.currentPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    }
+
+    subscription.cancelAtPeriodEnd = stripeSubscription.cancel_at_period_end || false;
+    subscription.canceledAt = canceledTimestamp && !isNaN(canceledTimestamp)
+      ? new Date(canceledTimestamp * 1000)
       : null;
 
     await subscription.save();
