@@ -10,7 +10,15 @@ const app = express();
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+
+// Apply JSON parsing to all routes except Stripe webhook
+app.use((req, res, next) => {
+  if (req.originalUrl === '/api/subscription/webhook') {
+    next(); // Skip JSON parsing for webhook
+  } else {
+    express.json()(req, res, next); // Apply JSON parsing for other routes
+  }
+});
 
 // Set timeout for all requests to 6 minutes (slightly longer than AI timeout)
 app.use((req, res, next) => {
