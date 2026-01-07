@@ -255,6 +255,25 @@ router.post("/cancel", requireRole(), async (req, res) => {
       cancelAtPeriodEnd
     );
 
+    // Create payment record for manual cancellation
+    const Payment = require("../models/Payment");
+    try {
+      await Payment.createLifecycleEvent('canceled', subscription, req.user.id, {
+        cancelAtPeriodEnd,
+        canceledBy: 'user',
+        canceledAt: new Date(),
+      });
+      logger.info("Cancellation payment record created", {
+        userId: req.user.id,
+        subscriptionId: subscription._id,
+      });
+    } catch (paymentError) {
+      logger.error("Failed to create cancellation payment record", {
+        userId: req.user.id,
+        error: paymentError.message,
+      });
+    }
+
     logger.info("Subscription canceled", {
       userId: req.user.id,
       cancelAtPeriodEnd,
@@ -290,6 +309,24 @@ router.post("/cancel", requireRole(), async (req, res) => {
 router.post("/reactivate", requireRole(), async (req, res) => {
   try {
     const subscription = await cancelSubscription(req.user.id, false);
+
+    // Create payment record for reactivation
+    const Payment = require("../models/Payment");
+    try {
+      await Payment.createLifecycleEvent('reactivated', subscription, req.user.id, {
+        reactivatedBy: 'user',
+        reactivatedAt: new Date(),
+      });
+      logger.info("Reactivation payment record created", {
+        userId: req.user.id,
+        subscriptionId: subscription._id,
+      });
+    } catch (paymentError) {
+      logger.error("Failed to create reactivation payment record", {
+        userId: req.user.id,
+        error: paymentError.message,
+      });
+    }
 
     logger.info("Subscription reactivated", {
       userId: req.user.id,
@@ -345,6 +382,48 @@ router.post(
         case "customer.subscription.updated": {
           const subscription = event.data.object;
           await syncSubscriptionFromStripe(subscription);
+          
+          // Create payment record for subscription changes
+          if (event.type === "customer.subscription.created") {
+            const dbSubscription = await Subscription.findOne({
+              stripeSubscriptionId: subscription.id,
+            });
+            
+            if (dbSubscription) {
+              const Payment = require("../models/Payment");
+              const planConfig = Subscription.getPlanConfig(dbSubscription.planName);
+              
+              try {
+                await new Payment({
+                  user: dbSubscription.user,
+                  subscription: dbSubscription._id,
+                  stripeSubscriptionId: subscription.id,
+                  stripeCustomerId: subscription.customer,
+                  amount: planConfig.price * 100, // Convert to cents
+                  currency: 'usd',
+                  status: 'succeeded',
+                  type: 'subscription',
+                  planName: dbSubscription.planName,
+                  periodStart: new Date(subscription.current_period_start * 1000),
+                  periodEnd: new Date(subscription.current_period_end * 1000),
+                  description: `New ${dbSubscription.planName} subscription created`,
+                  processedAt: new Date(subscription.created * 1000),
+                }).save();
+                
+                logger.info("Subscription creation payment record created", {
+                  subscriptionId: subscription.id,
+                  userId: dbSubscription.user,
+                  planName: dbSubscription.planName,
+                });
+              } catch (paymentError) {
+                logger.error("Failed to create subscription payment record", {
+                  subscriptionId: subscription.id,
+                  error: paymentError.message,
+                });
+              }
+            }
+          }
+          
           logger.info("Subscription synced from webhook", {
             eventType: event.type,
             subscriptionId: subscription.id,
@@ -362,6 +441,39 @@ router.post(
             dbSubscription.status = "canceled";
             dbSubscription.canceledAt = new Date();
             await dbSubscription.save();
+
+            // Create payment record for cancellation
+            const Payment = require("../models/Payment");
+            try {
+              await new Payment({
+                user: dbSubscription.user,
+                subscription: dbSubscription._id,
+                stripeSubscriptionId: subscription.id,
+                stripeCustomerId: subscription.customer,
+                amount: 0, // No charge for cancellation
+                currency: 'usd',
+                status: 'succeeded',
+                type: 'subscription',
+                planName: dbSubscription.planName,
+                description: `${dbSubscription.planName} subscription canceled`,
+                processedAt: new Date(),
+                metadata: {
+                  action: 'cancellation',
+                  canceledAt: subscription.canceled_at ? new Date(subscription.canceled_at * 1000) : new Date(),
+                  cancelReason: subscription.cancellation_details?.reason || 'user_requested',
+                },
+              }).save();
+              
+              logger.info("Subscription cancellation record created", {
+                subscriptionId: subscription.id,
+                userId: dbSubscription.user,
+              });
+            } catch (paymentError) {
+              logger.error("Failed to create cancellation record", {
+                subscriptionId: subscription.id,
+                error: paymentError.message,
+              });
+            }
 
             logger.info("Subscription canceled from webhook", {
               subscriptionId: subscription.id,
@@ -393,6 +505,30 @@ router.post(
 
         case "invoice.payment_succeeded": {
           const invoice = event.data.object;
+          
+          // Find the subscription to get user ID
+          const dbSubscription = await Subscription.findOne({
+            stripeCustomerId: invoice.customer,
+          });
+
+          if (dbSubscription) {
+            // Create payment record
+            const Payment = require("../models/Payment");
+            try {
+              await Payment.createFromStripeInvoice(invoice, dbSubscription.user, dbSubscription._id);
+              logger.info("Payment record created", {
+                invoiceId: invoice.id,
+                userId: dbSubscription.user,
+                amount: invoice.amount_paid / 100,
+              });
+            } catch (paymentError) {
+              logger.error("Failed to create payment record", {
+                invoiceId: invoice.id,
+                error: paymentError.message,
+              });
+            }
+          }
+
           logger.info("Payment succeeded", {
             invoiceId: invoice.id,
             customerId: invoice.customer,
@@ -411,11 +547,130 @@ router.post(
             dbSubscription.status = "past_due";
             await dbSubscription.save();
 
+            // Create payment record for failed payment
+            const Payment = require("../models/Payment");
+            try {
+              await new Payment({
+                user: dbSubscription.user,
+                subscription: dbSubscription._id,
+                stripeInvoiceId: invoice.id,
+                stripeCustomerId: invoice.customer,
+                stripeSubscriptionId: invoice.subscription,
+                amount: invoice.amount_due,
+                currency: invoice.currency,
+                status: 'failed',
+                type: 'subscription',
+                planName: dbSubscription.planName,
+                periodStart: invoice.period_start ? new Date(invoice.period_start * 1000) : null,
+                periodEnd: invoice.period_end ? new Date(invoice.period_end * 1000) : null,
+                description: `Failed payment for ${dbSubscription.planName} subscription`,
+                failedAt: new Date(),
+                failureReason: invoice.last_finalization_error?.message || 'Payment failed',
+                processedAt: new Date(invoice.created * 1000),
+              }).save();
+              
+              logger.info("Failed payment record created", {
+                invoiceId: invoice.id,
+                userId: dbSubscription.user,
+                amount: invoice.amount_due / 100,
+              });
+            } catch (paymentError) {
+              logger.error("Failed to create failed payment record", {
+                invoiceId: invoice.id,
+                error: paymentError.message,
+              });
+            }
+
             logger.warn("Payment failed", {
               invoiceId: invoice.id,
               customerId: invoice.customer,
               userId: dbSubscription.user,
             });
+          }
+          break;
+        }
+
+        case "charge.dispute.created": {
+          const dispute = event.data.object;
+          const dbSubscription = await Subscription.findOne({
+            stripeCustomerId: dispute.charge.customer,
+          });
+
+          if (dbSubscription) {
+            const Payment = require("../models/Payment");
+            try {
+              await new Payment({
+                user: dbSubscription.user,
+                subscription: dbSubscription._id,
+                stripeCustomerId: dispute.charge.customer,
+                amount: dispute.amount,
+                currency: dispute.currency,
+                status: 'refunded',
+                type: 'subscription',
+                planName: dbSubscription.planName,
+                description: `Dispute created for ${dbSubscription.planName} subscription`,
+                refundedAt: new Date(),
+                processedAt: new Date(dispute.created * 1000),
+                metadata: {
+                  action: 'dispute',
+                  disputeId: dispute.id,
+                  reason: dispute.reason,
+                },
+              }).save();
+              
+              logger.info("Dispute payment record created", {
+                disputeId: dispute.id,
+                userId: dbSubscription.user,
+                amount: dispute.amount / 100,
+              });
+            } catch (paymentError) {
+              logger.error("Failed to create dispute record", {
+                disputeId: dispute.id,
+                error: paymentError.message,
+              });
+            }
+          }
+          break;
+        }
+
+        case "invoice.payment_action_required": {
+          const invoice = event.data.object;
+          const dbSubscription = await Subscription.findOne({
+            stripeCustomerId: invoice.customer,
+          });
+
+          if (dbSubscription) {
+            const Payment = require("../models/Payment");
+            try {
+              await new Payment({
+                user: dbSubscription.user,
+                subscription: dbSubscription._id,
+                stripeInvoiceId: invoice.id,
+                stripeCustomerId: invoice.customer,
+                stripeSubscriptionId: invoice.subscription,
+                amount: invoice.amount_due,
+                currency: invoice.currency,
+                status: 'pending',
+                type: 'subscription',
+                planName: dbSubscription.planName,
+                description: `Payment action required for ${dbSubscription.planName} subscription`,
+                processedAt: new Date(invoice.created * 1000),
+                metadata: {
+                  action: 'payment_action_required',
+                  nextPaymentAttempt: invoice.next_payment_attempt ? new Date(invoice.next_payment_attempt * 1000) : null,
+                },
+              }).save();
+              
+              logger.info("Payment action required record created", {
+                invoiceId: invoice.id,
+                userId: dbSubscription.user,
+              });
+            } catch (paymentError) {
+              logger.error("Failed to create payment action required record", {
+                invoiceId: invoice.id,
+                error: paymentError.message,
+              });
+            }
           }
           break;
         }
@@ -439,6 +694,204 @@ router.post(
     }
   }
 );
+
+/**
+ * Get payment history for the authenticated user
+ */
+router.get("/payments", requireRole(), async (req, res) => {
+  try {
+    const { limit = 50, page = 1 } = req.query;
+    const limitNum = Math.min(parseInt(limit), 100);
+    const skip = (parseInt(page) - 1) * limitNum;
+    
+    // Try to get payments from Payment model first
+    const Payment = require("../models/Payment");
+    const payments = await Payment.find({ user: req.user.id })
+      .sort({ createdAt: -1 })
+      .limit(limitNum)
+      .skip(skip)
+      .lean();
+
+    if (payments.length > 0) {
+      // Format payment data
+      const formattedPayments = payments.map(payment => ({
+        id: payment._id,
+        stripeId: payment.stripeInvoiceId || payment.stripePaymentIntentId,
+        type: payment.type,
+        amount: payment.amount / 100, // Convert from cents
+        currency: payment.currency.toUpperCase(),
+        status: payment.status,
+        created: payment.createdAt,
+        description: payment.description,
+        receiptUrl: payment.receiptUrl,
+        invoiceUrl: payment.invoiceUrl,
+        planName: payment.planName,
+        periodStart: payment.periodStart,
+        periodEnd: payment.periodEnd,
+      }));
+
+      const totalPayments = await Payment.countDocuments({ user: req.user.id });
+
+      return res.json({
+        ok: true,
+        payments: formattedPayments,
+        hasMore: skip + limitNum < totalPayments,
+        totalFound: totalPayments,
+        currentPage: parseInt(page),
+      });
+    }
+
+    // Fallback: Create payment history from subscription data
+    const subscription = await Subscription.findOne({ user: req.user.id });
+    
+    if (!subscription) {
+      return res.json({
+        ok: true,
+        payments: [],
+        hasMore: false,
+        message: "No payment history found",
+      });
+    }
+
+    // Create a synthetic payment record based on current subscription
+    const syntheticPayments = [];
+    
+    if (subscription.planName !== 'free' && subscription.status === 'active') {
+      const planConfig = Subscription.getPlanConfig(subscription.planName);
+      syntheticPayments.push({
+        id: subscription._id,
+        stripeId: subscription.stripeSubscriptionId,
+        type: 'subscription',
+        amount: planConfig.price,
+        currency: 'USD',
+        status: 'succeeded',
+        created: subscription.currentPeriodStart || subscription.createdAt,
+        description: `${subscription.planName.charAt(0).toUpperCase() + subscription.planName.slice(1)} Plan Subscription`,
+        receiptUrl: null,
+        invoiceUrl: null,
+        planName: subscription.planName,
+        periodStart: subscription.currentPeriodStart,
+        periodEnd: subscription.currentPeriodEnd,
+      });
+    }
+
+    logger.info("Payment history retrieved from subscription data", {
+      userId: req.user.id,
+      paymentCount: syntheticPayments.length,
+    });
+
+    res.json({
+      ok: true,
+      payments: syntheticPayments,
+      hasMore: false,
+      totalFound: syntheticPayments.length,
+      currentPage: 1,
+      message: "Payment history generated from subscription data",
+    });
+
+  } catch (error) {
+    logger.error("Get payment history failed", {
+      userId: req.user.id,
+      error: error.message,
+    });
+    res.status(500).json({
+      error: "Failed to fetch payment history",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Get payment summary for the authenticated user
+ */
+router.get("/payment-summary", requireRole(), async (req, res) => {
+  try {
+    // Get user's subscription
+    const subscription = await Subscription.findOne({ user: req.user.id });
+    
+    if (!subscription) {
+      return res.json({
+        ok: true,
+        summary: {
+          totalPaid: 0,
+          currency: "USD",
+          paymentCount: 0,
+          lastPayment: null,
+          currentPlan: "free",
+          subscriptionStatus: "inactive",
+        },
+      });
+    }
+
+    // Try to get payment data from Payment model
+    const Payment = require("../models/Payment");
+    const payments = await Payment.find({ 
+      user: req.user.id, 
+      status: 'succeeded' 
+    }).sort({ createdAt: -1 });
+
+    let totalPaid = 0;
+    let lastPayment = null;
+    let paymentCount = payments.length;
+
+    if (payments.length > 0) {
+      // Calculate from actual payment records
+      totalPaid = payments.reduce((sum, payment) => sum + payment.amount, 0);
+      const latestPayment = payments[0];
+      lastPayment = {
+        amount: latestPayment.amount / 100,
+        currency: latestPayment.currency.toUpperCase(),
+        date: latestPayment.createdAt,
+        description: latestPayment.description,
+      };
+    } else if (subscription.planName !== 'free' && subscription.status === 'active') {
+      // Fallback: estimate from current subscription
+      const planConfig = Subscription.getPlanConfig(subscription.planName);
+      totalPaid = planConfig.price * 100; // Convert to cents for consistency
+      paymentCount = 1;
+      lastPayment = {
+        amount: planConfig.price,
+        currency: 'USD',
+        date: subscription.currentPeriodStart || subscription.createdAt,
+        description: `${subscription.planName.charAt(0).toUpperCase() + subscription.planName.slice(1)} Plan Subscription`,
+      };
+    }
+
+    logger.info("Payment summary retrieved", {
+      userId: req.user.id,
+      totalPaid: totalPaid / 100,
+      paymentCount,
+      source: payments.length > 0 ? 'payment_records' : 'subscription_estimate',
+    });
+
+    res.json({
+      ok: true,
+      summary: {
+        totalPaid: totalPaid / 100, // Convert from cents
+        currency: lastPayment?.currency || 'USD',
+        paymentCount,
+        lastPayment,
+        currentPlan: subscription.planName,
+        subscriptionStatus: subscription.status,
+        nextBillingDate: subscription.currentPeriodEnd,
+        visitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+        campaignsUsed: subscription.currentCampaignCount,
+        campaignLimit: subscription.campaignLimit,
+      },
+    });
+
+  } catch (error) {
+    logger.error("Get payment summary failed", {
+      userId: req.user.id,
+      error: error.message,
+    });
+    res.status(500).json({
+      error: "Failed to fetch payment summary",
+      message: error.message,
+    });
+  }
+});
 
 /**
  * Helper function to get plan descriptions
