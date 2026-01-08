@@ -322,6 +322,11 @@ async function updateSubscriptionPlan(userId, newPlanName) {
       subscription.stripeSubscriptionId
     );
 
+    // Store old plan info for payment record
+    const oldPlanName = subscription.planName;
+    const oldPlanConfig = Subscription.getPlanConfig(oldPlanName);
+    const newPlanConfig = Subscription.getPlanConfig(newPlanName);
+
     // Update subscription in Stripe
     const updatedSubscription = await stripe.subscriptions.update(
       subscription.stripeSubscriptionId,
@@ -339,9 +344,53 @@ async function updateSubscriptionPlan(userId, newPlanName) {
     // Sync to database
     await syncSubscriptionFromStripe(updatedSubscription, userId);
 
+    // Create payment record for the upgrade (manual fallback if webhook doesn't fire)
+    try {
+      const Payment = require("../models/Payment");
+      
+      // Calculate prorated amount (simplified - in production, get from Stripe invoice)
+      const priceDifference = newPlanConfig.price - oldPlanConfig.price;
+      const upgradeAmount = Math.max(priceDifference, 0); // Only charge if upgrading
+      
+      if (upgradeAmount > 0) {
+        await new Payment({
+          user: userId,
+          subscription: subscription._id,
+          stripeCustomerId: subscription.stripeCustomerId,
+          stripeSubscriptionId: subscription.stripeSubscriptionId,
+          amount: upgradeAmount * 100, // Convert to cents
+          currency: 'usd',
+          status: 'succeeded',
+          type: 'upgrade',
+          planName: newPlanName,
+          description: `Upgraded from ${oldPlanName} to ${newPlanName} plan`,
+          processedAt: new Date(),
+          metadata: {
+            upgradeFrom: oldPlanName,
+            upgradeTo: newPlanName,
+            priceDifference: upgradeAmount,
+            manuallyCreated: true, // Flag to indicate this wasn't from webhook
+          },
+        }).save();
+
+        logger.info("Upgrade payment record created", {
+          userId,
+          oldPlan: oldPlanName,
+          newPlan: newPlanName,
+          amount: upgradeAmount,
+        });
+      }
+    } catch (paymentError) {
+      logger.error("Failed to create upgrade payment record", {
+        userId,
+        error: paymentError.message,
+      });
+      // Don't fail the upgrade if payment record creation fails
+    }
+
     logger.info("Subscription plan updated", {
       userId,
-      oldPlan: subscription.planName,
+      oldPlan: oldPlanName,
       newPlan: newPlanName,
     });
 
