@@ -396,7 +396,7 @@ async function updateSubscriptionPlan(userId, newPlanName, paymentMethodId = nul
     // Store old plan info for payment record
     const oldPlanName = subscription.planName;
     const oldPlanConfig = Subscription.getPlanConfig(oldPlanName);
-    const newPlanConfig = Subscription.getPlanConfig(newPlanName);
+    // newPlanConfig already declared above for upgrade validation
 
     // Update subscription in Stripe
     const updatedSubscription = await stripe.subscriptions.update(
