@@ -478,6 +478,211 @@ async function resetMonthlyVisits() {
   }
 }
 
+/**
+ * Get customer's saved payment methods
+ */
+async function getPaymentMethods(userId) {
+  try {
+    const subscription = await Subscription.findOne({ user: userId });
+    if (!subscription || !subscription.stripeCustomerId) {
+      return { paymentMethods: [], defaultPaymentMethod: null };
+    }
+
+    // Get payment methods from Stripe
+    const paymentMethods = await stripe.paymentMethods.list({
+      customer: subscription.stripeCustomerId,
+      type: 'card',
+    });
+
+    // Get customer to find default payment method
+    const customer = await stripe.customers.retrieve(subscription.stripeCustomerId);
+
+    // Format payment methods for frontend
+    const formattedMethods = paymentMethods.data.map(pm => ({
+      id: pm.id,
+      type: pm.type,
+      card: {
+        brand: pm.card.brand,
+        last4: pm.card.last4,
+        expMonth: pm.card.exp_month,
+        expYear: pm.card.exp_year,
+        funding: pm.card.funding,
+      },
+      isDefault: pm.id === customer.invoice_settings?.default_payment_method,
+      created: new Date(pm.created * 1000),
+    }));
+
+    logger.info("Payment methods retrieved", {
+      userId,
+      methodCount: formattedMethods.length,
+    });
+
+    return {
+      paymentMethods: formattedMethods,
+      defaultPaymentMethod: customer.invoice_settings?.default_payment_method,
+    };
+  } catch (error) {
+    logger.error("Failed to get payment methods", {
+      userId,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Create setup session for adding new payment method
+ */
+async function createSetupSession(userId, successUrl, cancelUrl) {
+  try {
+    const subscription = await Subscription.findOne({ user: userId });
+    if (!subscription || !subscription.stripeCustomerId) {
+      throw new Error("No Stripe customer found");
+    }
+
+    // Create setup session for adding payment method
+    const session = await stripe.checkout.sessions.create({
+      customer: subscription.stripeCustomerId,
+      mode: 'setup',
+      payment_method_types: ['card'],
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      metadata: {
+        userId: userId.toString(),
+        purpose: 'add_payment_method',
+      },
+    });
+
+    logger.info("Setup session created", {
+      userId,
+      sessionId: session.id,
+    });
+
+    return session;
+  } catch (error) {
+    logger.error("Failed to create setup session", {
+      userId,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Set default payment method
+ */
+async function setDefaultPaymentMethod(userId, paymentMethodId) {
+  try {
+    const subscription = await Subscription.findOne({ user: userId });
+    if (!subscription || !subscription.stripeCustomerId) {
+      throw new Error("No Stripe customer found");
+    }
+
+    // Verify payment method belongs to customer
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+    if (paymentMethod.customer !== subscription.stripeCustomerId) {
+      throw new Error("Payment method does not belong to customer");
+    }
+
+    // Update customer's default payment method
+    await stripe.customers.update(subscription.stripeCustomerId, {
+      invoice_settings: {
+        default_payment_method: paymentMethodId,
+      },
+    });
+
+    logger.info("Default payment method updated", {
+      userId,
+      paymentMethodId,
+    });
+
+    return { success: true };
+  } catch (error) {
+    logger.error("Failed to set default payment method", {
+      userId,
+      paymentMethodId,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Remove payment method
+ */
+async function removePaymentMethod(userId, paymentMethodId) {
+  try {
+    const subscription = await Subscription.findOne({ user: userId });
+    if (!subscription || !subscription.stripeCustomerId) {
+      throw new Error("No Stripe customer found");
+    }
+
+    // Verify payment method belongs to customer
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+    if (paymentMethod.customer !== subscription.stripeCustomerId) {
+      throw new Error("Payment method does not belong to customer");
+    }
+
+    // Check if this is the only payment method
+    const allMethods = await stripe.paymentMethods.list({
+      customer: subscription.stripeCustomerId,
+      type: 'card',
+    });
+
+    if (allMethods.data.length === 1) {
+      throw new Error("Cannot remove the only payment method. Add another payment method first.");
+    }
+
+    // Detach payment method from customer
+    await stripe.paymentMethods.detach(paymentMethodId);
+
+    logger.info("Payment method removed", {
+      userId,
+      paymentMethodId,
+    });
+
+    return { success: true };
+  } catch (error) {
+    logger.error("Failed to remove payment method", {
+      userId,
+      paymentMethodId,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
+/**
+ * Create customer portal session (Stripe-hosted billing management)
+ */
+async function createCustomerPortalSession(userId, returnUrl) {
+  try {
+    const subscription = await Subscription.findOne({ user: userId });
+    if (!subscription || !subscription.stripeCustomerId) {
+      throw new Error("No Stripe customer found");
+    }
+
+    // Create customer portal session
+    const session = await stripe.billingPortal.sessions.create({
+      customer: subscription.stripeCustomerId,
+      return_url: returnUrl,
+    });
+
+    logger.info("Customer portal session created", {
+      userId,
+      sessionId: session.id,
+    });
+
+    return session;
+  } catch (error) {
+    logger.error("Failed to create customer portal session", {
+      userId,
+      error: error.message,
+    });
+    throw error;
+  }
+}
+
 module.exports = {
   createStripeCustomer,
   syncSubscriptionFromStripe,
@@ -488,4 +693,10 @@ module.exports = {
   resetMonthlyVisits,
   mapPriceIdToPlan,
   getPriceIdForPlan,
+  // Payment method management
+  getPaymentMethods,
+  createSetupSession,
+  setDefaultPaymentMethod,
+  removePaymentMethod,
+  createCustomerPortalSession,
 };

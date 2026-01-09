@@ -6,6 +6,11 @@ const {
   updateSubscriptionPlan,
   getSubscriptionDetails,
   syncSubscriptionFromStripe,
+  getPaymentMethods,
+  createSetupSession,
+  setDefaultPaymentMethod,
+  removePaymentMethod,
+  createCustomerPortalSession,
 } = require("../services/stripeService");
 const Subscription = require("../models/Subscription");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
@@ -888,6 +893,165 @@ router.get("/payment-summary", requireRole(), async (req, res) => {
     });
     res.status(500).json({
       error: "Failed to fetch payment summary",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Get user's saved payment methods
+ */
+router.get("/payment-methods", requireRole(), async (req, res) => {
+  try {
+    const paymentData = await getPaymentMethods(req.user.id);
+
+    res.json({
+      ok: true,
+      ...paymentData,
+    });
+  } catch (error) {
+    logger.error("Get payment methods failed", {
+      userId: req.user.id,
+      error: error.message,
+    });
+    res.status(500).json({
+      error: "Failed to fetch payment methods",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Create setup session for adding new payment method
+ */
+router.post("/add-payment-method", requireRole(), async (req, res) => {
+  try {
+    const { successUrl, cancelUrl } = req.body;
+
+    const session = await createSetupSession(
+      req.user.id,
+      successUrl || `${process.env.FRONTEND_URL}/billing/success`,
+      cancelUrl || `${process.env.FRONTEND_URL}/billing/cancel`
+    );
+
+    logger.info("Setup session created", {
+      userId: req.user.id,
+      sessionId: session.id,
+    });
+
+    res.json({
+      ok: true,
+      sessionId: session.id,
+      url: session.url,
+      message: "Setup session created successfully",
+    });
+  } catch (error) {
+    logger.error("Create setup session failed", {
+      userId: req.user.id,
+      error: error.message,
+    });
+    res.status(500).json({
+      error: "Failed to create setup session",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Set default payment method
+ */
+router.post("/set-default-payment-method", requireRole(), async (req, res) => {
+  try {
+    const { paymentMethodId } = req.body;
+
+    if (!paymentMethodId) {
+      return res.status(400).json({
+        error: "Payment method ID is required",
+      });
+    }
+
+    await setDefaultPaymentMethod(req.user.id, paymentMethodId);
+
+    logger.info("Default payment method set", {
+      userId: req.user.id,
+      paymentMethodId,
+    });
+
+    res.json({
+      ok: true,
+      message: "Default payment method updated successfully",
+    });
+  } catch (error) {
+    logger.error("Set default payment method failed", {
+      userId: req.user.id,
+      error: error.message,
+    });
+    res.status(500).json({
+      error: "Failed to set default payment method",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Remove payment method
+ */
+router.delete("/payment-methods/:paymentMethodId", requireRole(), async (req, res) => {
+  try {
+    const { paymentMethodId } = req.params;
+
+    await removePaymentMethod(req.user.id, paymentMethodId);
+
+    logger.info("Payment method removed", {
+      userId: req.user.id,
+      paymentMethodId,
+    });
+
+    res.json({
+      ok: true,
+      message: "Payment method removed successfully",
+    });
+  } catch (error) {
+    logger.error("Remove payment method failed", {
+      userId: req.user.id,
+      error: error.message,
+    });
+    res.status(500).json({
+      error: "Failed to remove payment method",
+      message: error.message,
+    });
+  }
+});
+
+/**
+ * Create customer portal session (Stripe-hosted billing management)
+ */
+router.post("/customer-portal", requireRole(), async (req, res) => {
+  try {
+    const { returnUrl } = req.body;
+
+    const session = await createCustomerPortalSession(
+      req.user.id,
+      returnUrl || `${process.env.FRONTEND_URL}/billing`
+    );
+
+    logger.info("Customer portal session created", {
+      userId: req.user.id,
+      sessionId: session.id,
+    });
+
+    res.json({
+      ok: true,
+      url: session.url,
+      message: "Customer portal session created successfully",
+    });
+  } catch (error) {
+    logger.error("Create customer portal session failed", {
+      userId: req.user.id,
+      error: error.message,
+    });
+    res.status(500).json({
+      error: "Failed to create customer portal session",
       message: error.message,
     });
   }
