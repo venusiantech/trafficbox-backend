@@ -305,7 +305,7 @@ async function cancelSubscription(userId, cancelAtPeriodEnd = true) {
 /**
  * Update subscription plan (upgrade/downgrade)
  */
-async function updateSubscriptionPlan(userId, newPlanName) {
+async function updateSubscriptionPlan(userId, newPlanName, paymentMethodId = null) {
   try {
     const subscription = await Subscription.findOne({ user: userId });
     if (!subscription || !subscription.stripeSubscriptionId) {
@@ -315,6 +315,77 @@ async function updateSubscriptionPlan(userId, newPlanName) {
     const newPriceId = getPriceIdForPlan(newPlanName);
     if (!newPriceId) {
       throw new Error(`Invalid plan name: ${newPlanName}`);
+    }
+
+    // Check if this is an upgrade that requires payment
+    const currentPlanConfig = Subscription.getPlanConfig(subscription.planName);
+    const newPlanConfig = Subscription.getPlanConfig(newPlanName);
+    const isUpgrade = newPlanConfig.price > currentPlanConfig.price;
+
+    // For upgrades, ensure user has a valid payment method
+    if (isUpgrade) {
+      try {
+        // Get customer's payment methods
+        const paymentMethods = await stripe.paymentMethods.list({
+          customer: subscription.stripeCustomerId,
+          type: 'card',
+        });
+
+        // Get customer to check default payment method
+        const customer = await stripe.customers.retrieve(subscription.stripeCustomerId);
+
+        // Check if user has any payment methods
+        if (paymentMethods.data.length === 0) {
+          throw new Error("No payment method found. Please add a payment method before upgrading.");
+        }
+
+        // Check if there's a default payment method or at least one attached method
+        const hasDefaultPaymentMethod = customer.invoice_settings?.default_payment_method;
+        const hasAttachedMethods = paymentMethods.data.length > 0;
+
+        if (!hasDefaultPaymentMethod && !hasAttachedMethods) {
+          throw new Error("No valid payment method found. Please add a payment method before upgrading.");
+        }
+
+        // If user specified a payment method, validate and use it
+        if (paymentMethodId) {
+          const specifiedMethod = paymentMethods.data.find(pm => pm.id === paymentMethodId);
+          if (!specifiedMethod) {
+            throw new Error("Specified payment method not found or not attached to customer");
+          }
+          
+          // Set the specified payment method as default for this upgrade
+          await stripe.customers.update(subscription.stripeCustomerId, {
+            invoice_settings: {
+              default_payment_method: paymentMethodId,
+            },
+          });
+          
+          logger.info("Using specified payment method for upgrade", {
+            userId,
+            paymentMethodId,
+          });
+        } else if (!hasDefaultPaymentMethod && hasAttachedMethods) {
+          // If no default and no specific method chosen, set the first one as default
+          await stripe.customers.update(subscription.stripeCustomerId, {
+            invoice_settings: {
+              default_payment_method: paymentMethods.data[0].id,
+            },
+          });
+          
+          logger.info("Auto-set default payment method for upgrade", {
+            userId,
+            paymentMethodId: paymentMethods.data[0].id,
+          });
+        }
+
+      } catch (paymentCheckError) {
+        logger.error("Payment method validation failed", {
+          userId,
+          error: paymentCheckError.message,
+        });
+        throw new Error(`Cannot upgrade: ${paymentCheckError.message}`);
+      }
     }
 
     // Get current subscription from Stripe

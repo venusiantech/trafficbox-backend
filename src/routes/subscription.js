@@ -145,7 +145,7 @@ router.post("/checkout", requireRole(), async (req, res) => {
  */
 router.post("/upgrade", requireRole(), async (req, res) => {
   try {
-    const { planName } = req.body;
+    const { planName, paymentMethodId } = req.body;
 
     if (!planName) {
       return res.status(400).json({
@@ -163,7 +163,8 @@ router.post("/upgrade", requireRole(), async (req, res) => {
 
     const updatedSubscription = await updateSubscriptionPlan(
       req.user.id,
-      planName
+      planName,
+      paymentMethodId
     );
 
     logger.info("Subscription upgraded", {
