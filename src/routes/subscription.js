@@ -57,7 +57,7 @@ router.get("/subscription", requireRole(), async (req, res) => {
  */
 router.get("/plans", async (req, res) => {
   try {
-    const plans = ["free", "starter", "growth", "business"/*, "premium"*/].map(
+    const plans = ["free", "starter", "growth", "business", "custom"/*, "premium"*/].map(
       (planName) => {
         const config = Subscription.getPlanConfig(planName);
         return {
@@ -1068,6 +1068,7 @@ function getPlanDescription(planName) {
     growth: "Ideal for growing businesses with multiple campaigns",
     business: "For established businesses with high traffic needs",
     premium: "Enterprise-level solution with full features and support",
+    custom: "Tailored plan based on your specific requirements - contact us for custom pricing",
   };
 
   return descriptions[planName] || "";
