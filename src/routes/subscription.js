@@ -57,7 +57,7 @@ router.get("/subscription", requireRole(), async (req, res) => {
  */
 router.get("/plans", async (req, res) => {
   try {
-    const plans = ["free", "starter", "growth", "business", "premium"].map(
+    const plans = ["free", "starter", "growth", "business"/*, "premium"*/].map(
       (planName) => {
         const config = Subscription.getPlanConfig(planName);
         return {
@@ -101,7 +101,7 @@ router.post("/checkout", requireRole(), async (req, res) => {
       });
     }
 
-    const validPlans = ["starter", "growth", "business", "premium"];
+    const validPlans = ["starter", "growth", "business"/*, "premium"*/];
     if (!validPlans.includes(planName)) {
       return res.status(400).json({
         error: "Invalid plan name",
@@ -153,7 +153,7 @@ router.post("/upgrade", requireRole(), async (req, res) => {
       });
     }
 
-    const validPlans = ["starter", "growth", "business", "premium"];
+    const validPlans = ["starter", "growth", "business"/*, "premium"*/];
     if (!validPlans.includes(planName)) {
       return res.status(400).json({
         error: "Invalid plan name",

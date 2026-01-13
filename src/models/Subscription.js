@@ -28,7 +28,7 @@ const subscriptionSchema = new mongoose.Schema(
     // Subscription details
     planName: {
       type: String,
-      enum: ["free", "starter", "growth", "business", "premium"],
+      enum: ["free", "starter", "growth", "business", "premium", "custom"],
       default: "free",
       required: true,
     },
@@ -140,6 +140,19 @@ const subscriptionSchema = new mongoose.Schema(
     // Metadata
     metadata: {
       type: mongoose.Schema.Types.Mixed,
+    },
+
+    // Custom plan details (for custom plans assigned by admin)
+    customPlanDetails: {
+      price: {
+        type: Number,
+      },
+      description: {
+        type: String,
+      },
+      customFeatures: {
+        type: mongoose.Schema.Types.Mixed,
+      },
     },
 
     // Admin assignment tracking
@@ -275,6 +288,20 @@ subscriptionSchema.statics.getPlanConfig = function (planName) {
       visitsIncluded: 10000000,
       campaignLimit: 10,
       price: 599,
+      features: {
+        countryTargeting: "advanced",
+        trafficSources: "advanced",
+        behaviorSettings: "full-suite",
+        campaignRenewal: "fully-automated",
+        support: "24-7-priority",
+        analytics: "realtime-api",
+      },
+    },
+    custom: {
+      planName: "custom",
+      visitsIncluded: 0, // Will be set by admin
+      campaignLimit: 0, // Will be set by admin
+      price: 0, // Will be set by admin
       features: {
         countryTargeting: "advanced",
         trafficSources: "advanced",

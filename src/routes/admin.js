@@ -937,7 +937,7 @@ router.post(
       const { planName, reason } = req.body;
 
       // Validate plan name
-      const validPlans = ["free", "starter", "growth", "business", "premium"];
+      const validPlans = ["free", "starter", "growth", "business", "premium", "custom"];
       if (!planName || !validPlans.includes(planName)) {
         return res.status(400).json({
           error: "Invalid plan name",
@@ -1125,6 +1125,182 @@ router.get(
       console.error("Error fetching subscription:", error);
       res.status(500).json({
         error: "Failed to fetch subscription",
+        details: error.message,
+      });
+    }
+  }
+);
+
+// Assign Custom Plan to User
+router.post(
+  "/users/:userId/custom-subscription",
+  requireRole("admin"),
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const {
+        visitsIncluded,
+        campaignLimit,
+        price,
+        description,
+        reason,
+        features,
+        durationDays,
+      } = req.body;
+
+      // Validate required fields
+      if (
+        visitsIncluded === undefined ||
+        campaignLimit === undefined ||
+        price === undefined
+      ) {
+        return res.status(400).json({
+          error: "Missing required fields",
+          required: ["visitsIncluded", "campaignLimit", "price"],
+          received: { visitsIncluded, campaignLimit, price },
+        });
+      }
+
+      // Validate values
+      if (
+        visitsIncluded < 0 ||
+        campaignLimit < 0 ||
+        price < 0 ||
+        !Number.isInteger(visitsIncluded) ||
+        !Number.isInteger(campaignLimit)
+      ) {
+        return res.status(400).json({
+          error: "Invalid values",
+          details:
+            "visitsIncluded and campaignLimit must be positive integers, price must be positive",
+        });
+      }
+
+      // Find user
+      const user = await User.findById(userId).select("-password");
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const Subscription = require("../models/Subscription");
+
+      // Get default custom plan config
+      const defaultCustomConfig = Subscription.getPlanConfig("custom");
+
+      // Merge provided features with defaults
+      const customFeatures = {
+        ...defaultCustomConfig.features,
+        ...(features || {}),
+      };
+
+      // Find or create subscription
+      let subscription = await Subscription.findOne({ user: userId });
+      const isNewSubscription = !subscription;
+
+      const duration = durationDays || 365; // Default 1 year
+
+      if (!subscription) {
+        // Create new subscription with custom plan
+        subscription = new Subscription({
+          user: userId,
+          stripeCustomerId:
+            user.stripeCustomerId || `admin_custom_${userId}`,
+          planName: "custom",
+          status: "active",
+          visitsIncluded: visitsIncluded,
+          campaignLimit: campaignLimit,
+          visitsUsed: 0,
+          features: customFeatures,
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: new Date(
+            Date.now() + duration * 24 * 60 * 60 * 1000
+          ),
+          customPlanDetails: {
+            price: price,
+            description:
+              description || `Custom plan for ${user.email}`,
+            customFeatures: features || {},
+          },
+          adminAssigned: true,
+          assignedBy: req.user.id,
+          assignedAt: new Date(),
+          assignmentReason:
+            reason || "Admin assigned custom plan",
+        });
+      } else {
+        // Update existing subscription to custom plan
+        const oldPlan = subscription.planName;
+
+        subscription.planName = "custom";
+        subscription.status = "active";
+        subscription.visitsIncluded = visitsIncluded;
+        subscription.campaignLimit = campaignLimit;
+        subscription.features = customFeatures;
+        subscription.customPlanDetails = {
+          price: price,
+          description:
+            description || `Custom plan for ${user.email}`,
+          customFeatures: features || {},
+        };
+        subscription.adminAssigned = true;
+        subscription.lastModifiedBy = req.user.id;
+        subscription.lastModifiedAt = new Date();
+        subscription.modificationReason =
+          reason ||
+          `Admin changed plan from ${oldPlan} to custom plan`;
+
+        // Reset period
+        subscription.currentPeriodStart = new Date();
+        subscription.currentPeriodEnd = new Date(
+          Date.now() + duration * 24 * 60 * 60 * 1000
+        );
+      }
+
+      await subscription.save();
+
+      // Count current campaigns
+      const Campaign = require("../models/Campaign");
+      const currentCampaigns = await Campaign.countDocuments({
+        user: userId,
+        $or: [{ is_archived: { $exists: false } }, { is_archived: false }],
+      });
+
+      res.json({
+        ok: true,
+        message: isNewSubscription
+          ? `Custom subscription assigned successfully to ${user.email}`
+          : `Subscription updated to custom plan for ${user.email}`,
+        action: isNewSubscription ? "created" : "updated",
+        subscription: {
+          planName: subscription.planName,
+          status: subscription.status,
+          visitsIncluded: subscription.visitsIncluded,
+          visitsUsed: subscription.visitsUsed,
+          campaignLimit: subscription.campaignLimit,
+          currentCampaigns: currentCampaigns,
+          features: subscription.features,
+          currentPeriodStart: subscription.currentPeriodStart,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+          customPlanDetails: subscription.customPlanDetails,
+          adminAssigned: true,
+          assignedBy: req.user.email,
+          reason:
+            reason ||
+            (isNewSubscription
+              ? "Admin assigned custom plan"
+              : "Admin updated to custom plan"),
+        },
+        user: {
+          id: user._id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+        },
+      });
+    } catch (error) {
+      console.error("Error assigning custom subscription:", error);
+      res.status(500).json({
+        error: "Failed to assign custom subscription",
         details: error.message,
       });
     }
