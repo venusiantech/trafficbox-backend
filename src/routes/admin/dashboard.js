@@ -43,12 +43,30 @@ router.get("/", requireRole("admin"), async (req, res) => {
       User.find({})
         .sort({ createdAt: -1 })
         .limit(10)
-        .select("email firstName lastName createdAt"),
+        .select("email firstName lastName createdAt role"),
       Campaign.find({})
         .sort({ createdAt: -1 })
         .limit(10)
         .populate("user", "email firstName lastName"),
     ]);
+
+    // Get subscription info for recent users
+    const recentUsersWithSubscriptions = await Promise.all(
+      recentUsers.map(async (user) => {
+        const subscription = await Subscription.findOne({ user: user._id }).select(
+          "planName status"
+        );
+        return {
+          _id: user._id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          createdAt: user.createdAt,
+          subscriptionPlan: subscription ? subscription.planName : "NONE",
+          subscriptionStatus: subscription ? subscription.status : null,
+        };
+      })
+    );
 
     res.json({
       ok: true,
@@ -56,6 +74,8 @@ router.get("/", requireRole("admin"), async (req, res) => {
         stats: {
           users: {
             total: totalUsers,
+            withSubscription: totalSubscriptions,
+            withoutSubscription: totalUsers - totalSubscriptions,
           },
           campaigns: {
             total: totalCampaigns,
@@ -80,7 +100,7 @@ router.get("/", requireRole("admin"), async (req, res) => {
           },
         },
         recent: {
-          users: recentUsers,
+          users: recentUsersWithSubscriptions,
           campaigns: recentCampaigns,
         },
       },
