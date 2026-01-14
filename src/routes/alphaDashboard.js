@@ -107,7 +107,8 @@ router.get("/overview", requireRole(), async (req, res) => {
           ? "archived"
           : campaignStatus;
 
-      const isActiveCampaign = userFriendlyStatus === "active";
+      // Include both "active" and "ok" status campaigns in totals (both are running)
+      const isActiveCampaign = userFriendlyStatus === "active" || userFriendlyStatus === "ok";
 
       // Use the 1h metrics for speed/bounce rate, but use campaign totals for hits/visits/views
       const primaryMetrics = currentMetrics["1h"] || {};
