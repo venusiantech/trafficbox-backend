@@ -12,11 +12,9 @@ const subscriptionSchema = new mongoose.Schema(
     stripeCustomerId: {
       type: String,
       required: true,
-      index: true,
     },
     stripeSubscriptionId: {
       type: String,
-      index: true,
     },
     stripePriceId: {
       type: String,

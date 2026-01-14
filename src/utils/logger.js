@@ -16,7 +16,9 @@ class Logger {
 
   formatMessage(level, message, meta = {}) {
     const timestamp = new Date().toISOString();
-    const metaStr = Object.keys(meta).length > 0 ? ` | Meta: ${JSON.stringify(meta)}` : '';
+    // Normalize meta: ensure it's an object; preserve non-object by wrapping
+    const safeMeta = meta && typeof meta === 'object' ? meta : (meta === undefined ? {} : { value: meta });
+    const metaStr = Object.keys(safeMeta).length > 0 ? ` | Meta: ${JSON.stringify(safeMeta)}` : '';
     return `[${timestamp}] [${level.toUpperCase()}] ${message}${metaStr}\n`;
   }
 
@@ -35,10 +37,19 @@ class Logger {
   }
 
   error(message, meta = {}) {
-    const formatted = this.formatMessage('error', message, meta);
-    this.writeToFile(this.logFile, formatted);
-    this.writeToFile(this.errorFile, formatted);
-    console.error(`[ERROR] ${message}`, meta);
+    try {
+      const formatted = this.formatMessage('error', message, meta);
+      this.writeToFile(this.logFile, formatted);
+      this.writeToFile(this.errorFile, formatted);
+      console.error(`[ERROR] ${message}`, meta);
+    } catch (e) {
+      // Fallback to basic console logging if logger fails
+      console.error('[ERROR] Logger failure', {
+        originalMessage: message,
+        meta,
+        loggerError: e && typeof e === 'object' ? (e.message || e) : e,
+      });
+    }
   }
 
   warn(message, meta = {}) {

@@ -6,6 +6,7 @@
     "start": "node src/server.js"
   },
   "dependencies": {
+    "aws-sdk": "^2.1545.0",
     "axios": "^1.11.0",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.2",
