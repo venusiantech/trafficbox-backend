@@ -17,8 +17,11 @@ router.get("/", requireRole("admin"), async (req, res) => {
       sparkTrafficCampaigns,
       nineHitsCampaigns,
       totalSubscriptions,
-      activeSubscriptions,
+      paidSubscriptions,
+      freeSubscriptions,
+      activePaidSubscriptions,
       subscriptionStats,
+      paidSubscriptionStats,
       recentUsers,
       recentCampaigns,
     ] = await Promise.all([
@@ -29,8 +32,28 @@ router.get("/", requireRole("admin"), async (req, res) => {
       Campaign.countDocuments({ spark_traffic_project_id: { $ne: null } }),
       Campaign.countDocuments({ nine_hits_campaign_id: { $ne: null } }),
       Subscription.countDocuments(),
-      Subscription.countDocuments({ status: { $in: ["active", "trialing"] } }),
+      Subscription.countDocuments({ planName: { $nin: ["free"] } }),
+      Subscription.countDocuments({ planName: "free" }),
+      Subscription.countDocuments({ 
+        planName: { $nin: ["free"] }, 
+        status: { $in: ["active", "trialing"] } 
+      }),
+      // All subscriptions stats
       Subscription.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalVisitsUsed: { $sum: "$visitsUsed" },
+            totalVisitsIncluded: { $sum: "$visitsIncluded" },
+            avgVisitsUsed: { $avg: "$visitsUsed" },
+          },
+        },
+      ]),
+      // Paid subscriptions stats only
+      Subscription.aggregate([
+        {
+          $match: { planName: { $nin: ["free"] } }
+        },
         {
           $group: {
             _id: null,
@@ -74,7 +97,8 @@ router.get("/", requireRole("admin"), async (req, res) => {
         stats: {
           users: {
             total: totalUsers,
-            withSubscription: totalSubscriptions,
+            withPaidSubscription: paidSubscriptions,
+            withFreeSubscription: freeSubscriptions,
             withoutSubscription: totalUsers - totalSubscriptions,
           },
           campaigns: {
@@ -85,18 +109,36 @@ router.get("/", requireRole("admin"), async (req, res) => {
             nineHits: nineHitsCampaigns,
           },
           subscriptions: {
-            total: totalSubscriptions,
-            active: activeSubscriptions,
-            totalVisitsUsed: subscriptionStats[0]?.totalVisitsUsed || 0,
-            totalVisitsIncluded: subscriptionStats[0]?.totalVisitsIncluded || 0,
-            avgVisitsUsed: Math.round(subscriptionStats[0]?.avgVisitsUsed || 0),
-            utilizationRate: subscriptionStats[0]?.totalVisitsIncluded
-              ? Math.round(
-                  (subscriptionStats[0].totalVisitsUsed /
-                    subscriptionStats[0].totalVisitsIncluded) *
-                    100
-                )
-              : 0,
+            paid: {
+              total: paidSubscriptions,
+              active: activePaidSubscriptions,
+              totalVisitsUsed: paidSubscriptionStats[0]?.totalVisitsUsed || 0,
+              totalVisitsIncluded: paidSubscriptionStats[0]?.totalVisitsIncluded || 0,
+              avgVisitsUsed: Math.round(paidSubscriptionStats[0]?.avgVisitsUsed || 0),
+              utilizationRate: paidSubscriptionStats[0]?.totalVisitsIncluded
+                ? Math.round(
+                    (paidSubscriptionStats[0].totalVisitsUsed /
+                      paidSubscriptionStats[0].totalVisitsIncluded) *
+                      100
+                  )
+                : 0,
+            },
+            free: {
+              total: freeSubscriptions,
+            },
+            overall: {
+              total: totalSubscriptions,
+              totalVisitsUsed: subscriptionStats[0]?.totalVisitsUsed || 0,
+              totalVisitsIncluded: subscriptionStats[0]?.totalVisitsIncluded || 0,
+              avgVisitsUsed: Math.round(subscriptionStats[0]?.avgVisitsUsed || 0),
+              utilizationRate: subscriptionStats[0]?.totalVisitsIncluded
+                ? Math.round(
+                    (subscriptionStats[0].totalVisitsUsed /
+                      subscriptionStats[0].totalVisitsIncluded) *
+                      100
+                  )
+                : 0,
+            },
           },
         },
         recent: {
