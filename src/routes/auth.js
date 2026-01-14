@@ -30,8 +30,6 @@ router.post("/register", async (req, res) => {
         dob: user.dob,
         role: user.role,
         cashBalance: user.cashBalance,
-        credits: user.credits,
-        availableHits: user.availableHits,
         createdAt: user.createdAt
       }
     });
@@ -65,8 +63,6 @@ router.post("/login", async (req, res) => {
         dob: user.dob,
         role: user.role,
         cashBalance: user.cashBalance,
-        credits: user.credits,
-        availableHits: user.availableHits,
         createdAt: user.createdAt,
         updatedAt: user.updatedAt
       }
@@ -110,8 +106,6 @@ router.post("/register-admin", async (req, res) => {
         dob: user.dob,
         role: user.role,
         cashBalance: user.cashBalance,
-        credits: user.credits,
-        availableHits: user.availableHits,
         createdAt: user.createdAt
       }
     });

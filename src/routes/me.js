@@ -1,13 +1,17 @@
 const express = require("express");
 const { requireRole } = require("../middleware/auth");
 const User = require("../models/User");
+const Subscription = require("../models/Subscription");
 const router = express.Router();
 
-// Get logged-in user's basic info, credits, and available hits
+// Get logged-in user's basic info and subscription details
 router.get("/", requireRole(), async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
     if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Get user's subscription
+    const subscription = await Subscription.findOne({ user: user._id });
 
     res.json({
       id: user._id,
@@ -19,8 +23,18 @@ router.get("/", requireRole(), async (req, res) => {
       cashBalance: user.cashBalance,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
-      credits: user.credits,
-      availableHits: user.availableHits
+      subscription: subscription
+        ? {
+            planName: subscription.planName,
+            status: subscription.status,
+            visitsUsed: subscription.visitsUsed,
+            visitsIncluded: subscription.visitsIncluded,
+            availableVisits: subscription.visitsIncluded - subscription.visitsUsed,
+            campaignLimit: subscription.campaignLimit,
+            currentPeriodStart: subscription.currentPeriodStart,
+            currentPeriodEnd: subscription.currentPeriodEnd,
+          }
+        : null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

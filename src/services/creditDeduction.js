@@ -59,7 +59,7 @@ async function postWithRetry(url, data, config = {}, retryCfg = {}) {
 }
 
 /**
- * Checks for new hits and deducts credits for SparkTraffic campaigns
+ * Checks for new hits and deducts visits from subscription for SparkTraffic campaigns
  * This function is called by the sync worker every 5 seconds
  */
 async function processAllCampaignCredits() {
@@ -74,22 +74,22 @@ async function processAllCampaignCredits() {
       is_archived: { $ne: true },
       // Only process ACTIVE states (skip paused/stopped/deleted)
       state: { $in: ["created", "ok", "running"] },
-    }).populate("user", "credits availableHits email");
+    }).populate("user", "email");
 
     let totalProcessed = 0;
     let totalErrors = 0;
-    let totalCreditsDeducted = 0;
+    let totalVisitsDeducted = 0;
 
     for (const campaign of campaigns) {
       try {
         const result = await processCampaignCredits(campaign);
         if (result.success) {
           totalProcessed++;
-          totalCreditsDeducted += result.creditsDeducted || 0;
+          totalVisitsDeducted += result.visitsDeducted || 0;
         }
       } catch (error) {
         totalErrors++;
-        logger.error("Failed to process campaign credits", {
+        logger.error("Failed to process campaign visits deduction", {
           campaignId: campaign._id,
           sparkTrafficProjectId: campaign.spark_traffic_project_id,
           error: error.message,
@@ -97,18 +97,18 @@ async function processAllCampaignCredits() {
       }
     }
 
-    logger.info("Credit deduction process completed", {
+    logger.info("Subscription visit deduction process completed", {
       totalCampaigns: campaigns.length,
       totalProcessed,
       totalErrors,
-      totalCreditsDeducted,
+      totalVisitsDeducted,
     });
 
     return {
       totalCampaigns: campaigns.length,
       totalProcessed,
       totalErrors,
-      totalCreditsDeducted,
+      totalVisitsDeducted,
     };
   } catch (error) {
     logger.error("Credit deduction process failed", {
@@ -319,21 +319,44 @@ async function processCampaignCredits(campaign) {
     }
 
     if (actualNewHits > 0) {
-      // Deduct credits based on new hits (1 credit per hit as an example)
-      const creditsToDeduct = actualNewHits * 1; // You can adjust the rate here
-
-      // Check if user has enough credits
-      if (campaign.user.credits < creditsToDeduct) {
-        logger.warn("Insufficient credits for deduction", {
+      // Get user's subscription
+      const subscription = await Subscription.findOne({ user: campaign.user._id });
+      if (!subscription) {
+        logger.error("No subscription found for user during credit deduction", {
           campaignId: campaign._id,
           userId: campaign.user._id,
           userEmail: campaign.user.email,
-          creditsToDeduct,
-          availableCredits: campaign.user.credits,
+        });
+        
+        // Pause the campaign if no subscription found
+        campaign.state = "paused";
+        campaign.credit_deduction_enabled = false;
+        await campaign.save();
+        
+        return {
+          success: true,
+          creditsDeducted: 0,
+          message: "No subscription found - campaign paused",
+          newHits: actualNewHits,
+        };
+      }
+
+      // Check if user has enough visits in subscription
+      const availableVisits = subscription.visitsIncluded - subscription.visitsUsed;
+      
+      if (availableVisits < actualNewHits) {
+        logger.warn("Insufficient subscription visits for deduction", {
+          campaignId: campaign._id,
+          userId: campaign.user._id,
+          userEmail: campaign.user.email,
+          visitsToDeduct: actualNewHits,
+          availableVisits,
+          visitsUsed: subscription.visitsUsed,
+          visitsIncluded: subscription.visitsIncluded,
           newHits: actualNewHits,
         });
 
-        // Pause the campaign at SparkTraffic API level if insufficient credits
+        // Pause the campaign at SparkTraffic API level if insufficient visits
         if (campaign.spark_traffic_project_id) {
           try {
             const axios = require("axios");
@@ -355,16 +378,18 @@ async function processCampaignCredits(campaign) {
               { retries: 2, baseDelayMs: 1000 }
             );
 
-            logger.info("Campaign paused due to insufficient credits", {
+            logger.info("Campaign paused due to insufficient subscription visits", {
               campaignId: campaign._id,
               userId: campaign.user._id,
               sparkTrafficProjectId: campaign.spark_traffic_project_id,
-              creditsToDeduct,
-              availableCredits: campaign.user.credits,
+              visitsToDeduct: actualNewHits,
+              availableVisits,
+              visitsUsed: subscription.visitsUsed,
+              visitsIncluded: subscription.visitsIncluded,
             });
           } catch (apiError) {
             logger.error(
-              "Failed to pause SparkTraffic campaign due to insufficient credits",
+              "Failed to pause SparkTraffic campaign due to insufficient visits",
               {
                 campaignId: campaign._id,
                 sparkTrafficProjectId: campaign.spark_traffic_project_id,
@@ -382,75 +407,39 @@ async function processCampaignCredits(campaign) {
         return {
           success: true,
           creditsDeducted: 0,
-          message: "Insufficient credits - campaign paused",
+          message: "Insufficient subscription visits - campaign paused",
           newHits: actualNewHits,
         };
       }
 
-      // Deduct credits from user
-      campaign.user.credits -= creditsToDeduct;
+      // Deduct visits from subscription only (no user credit/hit deduction)
+      subscription.visitsUsed += actualNewHits;
+      await subscription.save();
 
-      // Also deduct hits from availableHits (1 hit per credit deducted)
-      campaign.user.availableHits -= actualNewHits;
+      logger.info("Visits deducted from subscription", {
+        campaignId: campaign._id,
+        userId: campaign.user._id,
+        visitsDeducted: actualNewHits,
+        totalVisitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+        visitsRemaining: subscription.visitsIncluded - subscription.visitsUsed,
+      });
 
-      await campaign.user.save();
-
-      // Also deduct visits from subscription table
-      try {
-        const subscription = await Subscription.findOne({ user: campaign.user._id });
-        if (subscription) {
-
-          // Check if user has enough visits in subscription
-          if (subscription.visitsUsed + actualNewHits > subscription.visitsIncluded) {
-            logger.warn("Subscription visit limit would be exceeded", {
-              campaignId: campaign._id,
-              userId: campaign.user._id,
-              userEmail: campaign.user.email,
-              currentVisitsUsed: subscription.visitsUsed,
-              visitsIncluded: subscription.visitsIncluded,
-              newHits: actualNewHits,
-            });
-          }
-
-          // Deduct visits from subscription (even if it goes over limit for tracking)
-          subscription.visitsUsed += actualNewHits;
-          await subscription.save();
-
-          logger.info("Visits deducted from subscription", {
-            campaignId: campaign._id,
-            userId: campaign.user._id,
-            visitsDeducted: actualNewHits,
-            totalVisitsUsed: subscription.visitsUsed,
-            visitsIncluded: subscription.visitsIncluded,
-          });
-        } else {
-          logger.warn("No subscription found for user", {
-            campaignId: campaign._id,
-            userId: campaign.user._id,
-            userEmail: campaign.user.email,
-          });
-        }
-      } catch (subscriptionError) {
-        logger.error("Failed to deduct visits from subscription", {
-          campaignId: campaign._id,
-          userId: campaign.user._id,
-          error: subscriptionError.message,
-        });
-        // Don't throw error here to avoid breaking credit deduction
-      }
-
-      // Check if credits went below zero and pause campaign if so
-      if (campaign.user.credits < 0) {
-        logger.warn("User credits went below zero, pausing campaign", {
+      // Check if visits exceeded limit and pause campaign if so
+      if (subscription.visitsUsed > subscription.visitsIncluded) {
+        logger.warn("Subscription visit limit exceeded, pausing campaign", {
           campaignId: campaign._id,
           userId: campaign.user._id,
           userEmail: campaign.user.email,
-          currentCredits: campaign.user.credits,
+          visitsUsed: subscription.visitsUsed,
+          visitsIncluded: subscription.visitsIncluded,
+          overage: subscription.visitsUsed - subscription.visitsIncluded,
         });
 
         // Pause the campaign at SparkTraffic API level
         if (campaign.spark_traffic_project_id) {
           try {
+            const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
             await postWithRetry(
               "https://v2.sparktraffic.com/modify-website-traffic-project",
               {
@@ -467,10 +456,11 @@ async function processCampaignCredits(campaign) {
               { retries: 2, baseDelayMs: 1000 }
             );
 
-            logger.info("Campaign paused due to negative credits", {
+            logger.info("Campaign paused due to visit limit exceeded", {
               campaignId: campaign._id,
               sparkTrafficProjectId: campaign.spark_traffic_project_id,
-              currentCredits: campaign.user.credits,
+              visitsUsed: subscription.visitsUsed,
+              visitsIncluded: subscription.visitsIncluded,
             });
           } catch (apiError) {
             logger.error("Failed to pause SparkTraffic campaign", {
@@ -499,10 +489,12 @@ async function processCampaignCredits(campaign) {
 
       return {
         success: true,
-        creditsDeducted: creditsToDeduct,
-        hitsDeducted: actualNewHits,
+        visitsDeducted: actualNewHits,
         newHits: actualNewHits,
-        message: `Deducted ${creditsToDeduct} credits, ${actualNewHits} hits, and ${actualNewHits} subscription visits for ${actualNewHits} new traffic hits`,
+        visitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+        visitsRemaining: subscription.visitsIncluded - subscription.visitsUsed,
+        message: `Deducted ${actualNewHits} visits from subscription for ${actualNewHits} new traffic hits`,
       };
     } else {
       // No new hits, just update the check time
@@ -534,7 +526,7 @@ async function processCampaignCredits(campaign) {
 }
 
 /**
- * Manually trigger credit deduction for a specific campaign
+ * Manually trigger visit deduction from subscription for a specific campaign
  * @param {string} campaignId - Campaign ID to process
  * @returns {Object} - Result of the processing
  */
@@ -542,7 +534,7 @@ async function processSingleCampaignCredits(campaignId) {
   try {
     const campaign = await Campaign.findById(campaignId).populate(
       "user",
-      "credits availableHits email"
+      "email"
     );
 
     if (!campaign) {

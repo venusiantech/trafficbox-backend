@@ -6,6 +6,7 @@ const {
 } = require("../middleware/subscription");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
+const Subscription = require("../models/Subscription");
 const vendors = require("../services/vendors");
 const {
   processSingleCampaignCredits,
@@ -271,41 +272,54 @@ router.post(
         }
       }
 
-      // Check user's available hits before creating campaign
+      // Check subscription before creating campaign
       const user = await User.findById(userId);
       if (!user) {
         logger.error("User not found", { userId });
         return res.status(404).json({ error: "User not found" });
       }
 
-      const requiredHits = body.maxHits || 5;
-      if (user.availableHits < requiredHits) {
-        logger.warn("Insufficient hits", {
+      // Get user's subscription
+      const subscription = await Subscription.findOne({ user: userId });
+      if (!subscription) {
+        logger.error("No subscription found for user", { userId, userEmail: user.email });
+        return res.status(404).json({ error: "No subscription found. Please subscribe to create campaigns." });
+      }
+
+      // Check if subscription is active
+      if (subscription.status !== "active" && subscription.status !== "trialing") {
+        logger.warn("Inactive subscription for Alpha campaign", {
           userId,
           userEmail: user.email,
-          required: requiredHits,
-          available: user.availableHits,
+          subscriptionStatus: subscription.status,
         });
         return res.status(400).json({
-          error: "Insufficient hits",
-          required: requiredHits,
-          available: user.availableHits,
+          error: "Subscription is not active",
+          status: subscription.status,
+          message: "Please activate your subscription to create campaigns.",
         });
       }
 
-      // Check user's credits before creating campaign (1 credit per hit minimum)
-      if (user.credits < requiredHits) {
-        logger.warn("Insufficient credits for Alpha campaign", {
+      // Check if user has available visits in their subscription
+      const availableVisits = subscription.visitsIncluded - subscription.visitsUsed;
+      const requiredHits = body.maxHits || 5;
+      
+      if (availableVisits < requiredHits) {
+        logger.warn("Insufficient subscription visits for Alpha campaign", {
           userId,
           userEmail: user.email,
-          requiredCredits: requiredHits,
-          availableCredits: user.credits,
+          requiredVisits: requiredHits,
+          availableVisits,
+          visitsUsed: subscription.visitsUsed,
+          visitsIncluded: subscription.visitsIncluded,
         });
         return res.status(400).json({
-          error: "Insufficient credits",
+          error: "Insufficient visits in subscription",
           required: requiredHits,
-          available: user.credits,
-          message: "Alpha campaigns require 1 credit per hit",
+          available: availableVisits,
+          visitsUsed: subscription.visitsUsed,
+          visitsIncluded: subscription.visitsIncluded,
+          message: "Your subscription does not have enough visits remaining. Please upgrade your plan.",
         });
       }
 
@@ -491,9 +505,7 @@ router.post(
           requestBodySpeed: req.body.speed,
         });
 
-        // Deduct hits from user after successful campaign creation
-        user.availableHits -= requiredHits;
-        await user.save();
+        // Note: No immediate deduction - visits will be deducted by creditDeduction service as traffic is delivered
 
         // Initialize Alpha traffic tracking for the new campaign
         try {
@@ -520,8 +532,8 @@ router.post(
           userId,
           campaignId: camp._id,
           sparkTrafficProjectId: projectId,
-          hitsDeducted: requiredHits,
-          remainingHits: user.availableHits,
+          subscriptionPlan: subscription.planName,
+          visitsRemaining: subscription.visitsIncluded - subscription.visitsUsed,
         });
 
         return res.json({
@@ -534,9 +546,11 @@ router.post(
             dailyHits: [],
             dailyVisits: [],
           }),
-          userStats: {
-            hitsDeducted: requiredHits,
-            remainingHits: user.availableHits,
+          subscription: {
+            planName: subscription.planName,
+            visitsUsed: subscription.visitsUsed,
+            visitsIncluded: subscription.visitsIncluded,
+            visitsRemaining: subscription.visitsIncluded - subscription.visitsUsed,
           },
           message: "Alpha campaign created successfully",
           vendor: "sparkTraffic",
@@ -1121,16 +1135,45 @@ router.post("/campaigns/:id/resume", requireRole(), async (req, res) => {
       return res.status(403).json({ error: "Forbidden" });
     }
 
-    // Check if user has sufficient credits before resuming
-    if (c.user.credits <= 0) {
-      logger.warn("Cannot resume Alpha campaign - insufficient credits", {
+    // Check if user has sufficient subscription visits before resuming
+    const subscription = await Subscription.findOne({ user: c.user._id });
+    if (!subscription) {
+      logger.warn("Cannot resume Alpha campaign - no subscription found", {
         userId: req.user.id,
         campaignId: req.params.id,
-        userCredits: c.user.credits,
       });
       return res.status(400).json({
-        error: "Cannot resume campaign - insufficient credits",
-        userCredits: c.user.credits,
+        error: "Cannot resume campaign - no subscription found",
+      });
+    }
+
+    // Check if subscription is active
+    if (subscription.status !== "active" && subscription.status !== "trialing") {
+      logger.warn("Cannot resume Alpha campaign - subscription not active", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+        subscriptionStatus: subscription.status,
+      });
+      return res.status(400).json({
+        error: "Cannot resume campaign - subscription is not active",
+        status: subscription.status,
+      });
+    }
+
+    // Check if user has available visits
+    const availableVisits = subscription.visitsIncluded - subscription.visitsUsed;
+    if (availableVisits <= 0) {
+      logger.warn("Cannot resume Alpha campaign - insufficient visits", {
+        userId: req.user.id,
+        campaignId: req.params.id,
+        visitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+      });
+      return res.status(400).json({
+        error: "Cannot resume campaign - insufficient visits in subscription",
+        visitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+        message: "Please upgrade your subscription plan to resume this campaign.",
       });
     }
 
@@ -1703,7 +1746,7 @@ router.get("/campaigns/:id/report.pdf", requireRole(), async (req, res) => {
   }
 });
 
-// Get user's credit status and paused campaigns
+// Get user's subscription status and paused campaigns
 router.get("/credit-status", requireRole(), async (req, res) => {
   try {
     const user = await User.findById(req.user.id);
@@ -1711,7 +1754,13 @@ router.get("/credit-status", requireRole(), async (req, res) => {
       return res.status(404).json({ error: "User not found" });
     }
 
-    // Find paused Alpha campaigns due to insufficient credits
+    // Get user's subscription
+    const subscription = await Subscription.findOne({ user: req.user.id });
+    if (!subscription) {
+      return res.status(404).json({ error: "No subscription found" });
+    }
+
+    // Find paused Alpha campaigns due to insufficient visits
     const pausedCampaigns = await Campaign.find({
       user: req.user.id,
       spark_traffic_project_id: { $exists: true, $ne: null },
@@ -1719,27 +1768,39 @@ router.get("/credit-status", requireRole(), async (req, res) => {
       credit_deduction_enabled: false,
     }).select("_id title urls spark_traffic_project_id createdAt");
 
-    logger.info("Credit status checked", {
+    const availableVisits = subscription.visitsIncluded - subscription.visitsUsed;
+
+    logger.info("Subscription status checked", {
       userId: req.user.id,
-      userCredits: user.credits,
+      planName: subscription.planName,
+      visitsUsed: subscription.visitsUsed,
+      visitsIncluded: subscription.visitsIncluded,
+      availableVisits,
       pausedCampaignsCount: pausedCampaigns.length,
     });
 
     return res.json({
       ok: true,
-      credits: user.credits,
-      availableHits: user.availableHits,
+      subscription: {
+        planName: subscription.planName,
+        status: subscription.status,
+        visitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+        availableVisits,
+        currentPeriodStart: subscription.currentPeriodStart,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+      },
       pausedCampaigns: pausedCampaigns.map((campaign) => ({
         id: campaign._id,
         title: campaign.title,
         url: campaign.urls[0] || "N/A",
         createdAt: campaign.createdAt,
-        reason: "Insufficient credits",
+        reason: "Insufficient visits in subscription",
       })),
       totalPausedCampaigns: pausedCampaigns.length,
     });
   } catch (err) {
-    logger.error("Credit status check failed", {
+    logger.error("Subscription status check failed", {
       userId: req.user.id,
       error: err.message,
       stack: err.stack,

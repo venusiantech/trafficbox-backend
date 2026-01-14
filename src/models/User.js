@@ -10,8 +10,6 @@ const userSchema = new mongoose.Schema(
     lastName: { type: String },
     dob: { type: Date }, // Date of Birth
     cashBalance: { type: Number, default: 0 }, // User's cash balance
-    credits: { type: Number, default: 5000 }, // Free credits given to new users
-    availableHits: { type: Number, default: 1666 }, // 5000/3 = 1666.67 rounded down
     // Stripe integration
     stripeCustomerId: { type: String, index: true }, // Stripe customer ID
     // Add more fields as needed
@@ -22,14 +20,6 @@ const userSchema = new mongoose.Schema(
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   this.password = await bcrypt.hash(this.password, 10);
-  next();
-});
-
-// Auto-calculate availableHits when credits change
-userSchema.pre("save", function (next) {
-  if (this.isModified("credits")) {
-    this.availableHits = Math.floor(this.credits / 3);
-  }
   next();
 });
 

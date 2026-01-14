@@ -2,6 +2,7 @@ const express = require("express");
 const { requireRole } = require("../middleware/auth");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
+const Subscription = require("../models/Subscription");
 const vendors = require("../services/vendors");
 const {
   processSingleCampaignCredits,
@@ -217,25 +218,54 @@ router.post("/", requireRole(), async (req, res) => {
       }
     }
 
-    // Check user's available hits before creating campaign
+    // Check subscription before creating campaign
     const user = await User.findById(userId);
     if (!user) {
       logger.error("User not found", { userId });
       return res.status(404).json({ error: "User not found" });
     }
 
-    const requiredHits = body.maxHits || 5;
-    if (user.availableHits < requiredHits) {
-      logger.warn("Insufficient hits", {
+    // Get user's subscription
+    const subscription = await Subscription.findOne({ user: userId });
+    if (!subscription) {
+      logger.error("No subscription found for user", { userId, userEmail: user.email });
+      return res.status(404).json({ error: "No subscription found. Please subscribe to create campaigns." });
+    }
+
+    // Check if subscription is active
+    if (subscription.status !== "active" && subscription.status !== "trialing") {
+      logger.warn("Inactive subscription for campaign", {
         userId,
         userEmail: user.email,
-        required: requiredHits,
-        available: user.availableHits,
+        subscriptionStatus: subscription.status,
       });
       return res.status(400).json({
-        error: "Insufficient hits",
+        error: "Subscription is not active",
+        status: subscription.status,
+        message: "Please activate your subscription to create campaigns.",
+      });
+    }
+
+    // Check if user has available visits in their subscription
+    const availableVisits = subscription.visitsIncluded - subscription.visitsUsed;
+    const requiredHits = body.maxHits || 5;
+    
+    if (availableVisits < requiredHits) {
+      logger.warn("Insufficient subscription visits for campaign", {
+        userId,
+        userEmail: user.email,
+        requiredVisits: requiredHits,
+        availableVisits,
+        visitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+      });
+      return res.status(400).json({
+        error: "Insufficient visits in subscription",
         required: requiredHits,
-        available: user.availableHits,
+        available: availableVisits,
+        visitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+        message: "Your subscription does not have enough visits remaining. Please upgrade your plan.",
       });
     }
 
@@ -369,24 +399,24 @@ router.post("/", requireRole(), async (req, res) => {
 
         await camp.save();
 
-        // Deduct hits from user after successful campaign creation
-        user.availableHits -= requiredHits;
-        await user.save();
+        // Note: No immediate deduction - visits will be deducted by creditDeduction service as traffic is delivered
 
         logger.campaign("Campaign created successfully", {
           userId,
           campaignId: camp._id,
           sparkTrafficProjectId: projectId,
-          hitsDeducted: requiredHits,
-          remainingHits: user.availableHits,
+          subscriptionPlan: subscription.planName,
+          visitsRemaining: subscription.visitsIncluded - subscription.visitsUsed,
         });
 
         return res.json({
           ok: true,
           campaign: createCleanCampaignResponse(camp),
-          userStats: {
-            hitsDeducted: requiredHits,
-            remainingHits: user.availableHits,
+          subscription: {
+            planName: subscription.planName,
+            visitsUsed: subscription.visitsUsed,
+            visitsIncluded: subscription.visitsIncluded,
+            visitsRemaining: subscription.visitsIncluded - subscription.visitsUsed,
           },
           message: "Campaign created successfully",
         });
@@ -477,18 +507,14 @@ router.post("/", requireRole(), async (req, res) => {
 
     await camp.save();
 
-    // Deduct hits from user after successful 9Hits campaign creation
-    user.availableHits -= requiredHits;
-    await user.save();
+    // Note: 9Hits campaigns use subscription-based visit tracking
+    // Visits will be deducted by the credit deduction service
 
     res.json({
       ok: true,
       campaign: createCleanCampaignResponse(camp),
       vendorRaw: vendorResp,
-      userStats: {
-        hitsDeducted: requiredHits,
-        remainingHits: user.availableHits,
-      },
+      message: "Campaign created successfully. Visits will be tracked against your subscription.",
     });
     
     // ===== END 9HITS INTEGRATION =====
@@ -609,28 +635,46 @@ router.get("/", requireRole(), async (req, res) => {
   }
 });
 
-// Get user stats (credits and available hits) - MUST BE BEFORE /:id route
+// Get user stats (subscription-based) - MUST BE BEFORE /:id route
 router.get("/user/stats", requireRole(), async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select(
-      "credits availableHits email firstName lastName"
+      "email firstName lastName"
     );
     if (!user) {
       logger.warn("User not found for stats", { userId: req.user.id });
       return res.status(404).json({ error: "User not found" });
     }
 
-    res.json({
+    // Get subscription info (primary source of truth)
+    const subscription = await Subscription.findOne({ user: req.user.id });
+    
+    const response = {
       ok: true,
       user: {
         id: user._id,
         email: user.email,
         firstName: user.firstName,
         lastName: user.lastName,
-        credits: user.credits,
-        availableHits: user.availableHits,
       },
-    });
+    };
+
+    // Add subscription info if available (active source of truth)
+    if (subscription) {
+      response.subscription = {
+        planName: subscription.planName,
+        status: subscription.status,
+        visitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+        availableVisits: subscription.visitsIncluded - subscription.visitsUsed,
+        currentPeriodStart: subscription.currentPeriodStart,
+        currentPeriodEnd: subscription.currentPeriodEnd,
+        campaignLimit: subscription.campaignLimit,
+        currentCampaignCount: subscription.currentCampaignCount,
+      };
+    }
+
+    res.json(response);
   } catch (err) {
     logger.error("Get user stats failed", {
       userId: req.user.id,
@@ -1700,64 +1744,8 @@ router.get("/:id/stats", requireRole(), async (req, res) => {
   }
 });
 
-// Add credits to user (admin only)
-router.post("/user/:userId/add-credits", requireRole("admin"), async (req, res) => {
-  try {
-    const { credits } = req.body;
-    if (!credits || credits <= 0) {
-      logger.warn("Invalid credits amount", {
-        adminId: req.user.id,
-        targetUserId: req.params.userId,
-        credits,
-      });
-      return res.status(400).json({ error: "Invalid credits amount" });
-    }
-
-    const user = await User.findById(req.params.userId);
-    if (!user) {
-      logger.warn("User not found for credit addition", {
-        adminId: req.user.id,
-        targetUserId: req.params.userId,
-      });
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const oldCredits = user.credits;
-    const oldHits = user.availableHits;
-    const hitsToAdd = Math.floor(credits / 3);
-
-    user.credits += credits;
-    user.availableHits += hitsToAdd;
-    await user.save();
-
-    logger.campaign("Credits added", {
-      adminId: req.user.id,
-      targetUserId: req.params.userId,
-      userEmail: user.email,
-      creditsAdded: credits,
-      hitsAdded: hitsToAdd,
-    });
-
-    res.json({
-      ok: true,
-      message: `Added ${credits} credits and ${hitsToAdd} hits to user`,
-      user: {
-        id: user._id,
-        email: user.email,
-        credits: user.credits,
-        availableHits: user.availableHits,
-      },
-    });
-  } catch (err) {
-    logger.error("Add credits failed", {
-      adminId: req.user.id,
-      targetUserId: req.params.userId,
-      error: err.message,
-      stack: err.stack,
-    });
-    res.status(500).json({ error: err.message });
-  }
-});
+// REMOVED: Add credits endpoint - System now uses subscription-based visit tracking
+// Use subscription management endpoints instead
 
 // Manual credit deduction for specific campaign (admin only)
 router.post("/:id/process-credits", requireRole("admin"), async (req, res) => {
@@ -1791,7 +1779,7 @@ router.post("/:id/test-credits", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id).populate(
       "user",
-      "credits availableHits email"
+      "email"
     );
     if (!c) {
       return res.status(404).json({ error: "Campaign not found" });
@@ -1862,9 +1850,12 @@ router.post("/:id/test-credits", requireRole(), async (req, res) => {
       },
     });
 
+    // Get subscription info for debugging
+    const subscription = await Subscription.findOne({ user: c.user._id });
+
     res.json({
       ok: true,
-      message: "Test credit processing completed",
+      message: "Test visit deduction processing completed (subscription-based)",
       result,
       currentState: {
         totalCurrentHits,
@@ -1872,13 +1863,19 @@ router.post("/:id/test-credits", requireRole(), async (req, res) => {
         potentialNewHits,
         lastStatsCheck: c.last_stats_check,
         creditDeductionEnabled: c.credit_deduction_enabled,
-        userCredits: c.user.credits,
       },
+      subscription: subscription ? {
+        planName: subscription.planName,
+        status: subscription.status,
+        visitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+        availableVisits: subscription.visitsIncluded - subscription.visitsUsed,
+      } : null,
       explanation:
         potentialNewHits === 0
           ? "No new hits since last automatic check. The system has already processed all current hits."
-          : `${potentialNewHits} new hits detected and will be charged.`,
-      info: "This endpoint shows current state and processes any new hits since last check",
+          : `${potentialNewHits} new hits detected and visits will be deducted from subscription.`,
+      info: "This endpoint shows current state and processes any new hits since last check. System now uses subscription-based visit deduction.",
     });
   } catch (err) {
     logger.error("Test credit processing failed", {
@@ -1896,7 +1893,7 @@ router.get("/:id/credit-debug", requireRole(), async (req, res) => {
   try {
     const c = await Campaign.findById(req.params.id).populate(
       "user",
-      "credits availableHits email"
+      "email"
     );
     if (!c) {
       return res.status(404).json({ error: "Campaign not found" });
@@ -1968,6 +1965,9 @@ router.get("/:id/credit-debug", requireRole(), async (req, res) => {
     const totalHitsCounted = c.total_hits_counted || 0;
     const potentialNewHits = Math.max(0, totalCurrentHits - totalHitsCounted);
 
+    // Get subscription info for debugging
+    const subscription = await Subscription.findOne({ user: c.user._id });
+
     res.json({
       ok: true,
       campaign: {
@@ -1982,9 +1982,16 @@ router.get("/:id/credit-debug", requireRole(), async (req, res) => {
       user: {
         id: c.user._id,
         email: c.user.email,
-        credits: c.user.credits,
-        availableHits: c.user.availableHits,
       },
+      subscription: subscription ? {
+        planName: subscription.planName,
+        status: subscription.status,
+        visitsUsed: subscription.visitsUsed,
+        visitsIncluded: subscription.visitsIncluded,
+        availableVisits: subscription.visitsIncluded - subscription.visitsUsed,
+        campaignLimit: subscription.campaignLimit,
+        currentCampaignCount: subscription.currentCampaignCount,
+      } : null,
       currentStats: {
         totalCurrentHits,
         todayHits,
@@ -2002,14 +2009,15 @@ router.get("/:id/credit-debug", requireRole(), async (req, res) => {
       },
       analysis: {
         status: potentialNewHits > 0 ? "NEW_HITS_AVAILABLE" : "NO_NEW_HITS",
-        nextChargeAmount: potentialNewHits * 1, // 1 credit per hit
+        nextChargeAmount: potentialNewHits, // Visits to deduct from subscription
         explanation:
           potentialNewHits === 0
             ? "All current hits have been processed. Wait for more traffic or check if automatic system is working."
-            : `${potentialNewHits} new hits ready to be charged (${potentialNewHits} credits).`,
+            : `${potentialNewHits} new hits ready to be charged (${potentialNewHits} visits will be deducted from subscription).`,
         dateRangeExplanation: `Total hits counted (${totalHitsCounted}) covers the full date range from campaign creation. Today's hits: ${todayHits}. Full range total: ${totalCurrentHits}.`,
+        subscriptionNote: "System now uses subscription-based visit deduction instead of user credits.",
       },
-      info: "Debug endpoint - shows current state without processing any charges",
+      info: "Debug endpoint - shows current state without processing any deductions. System is now subscription-based.",
     });
   } catch (err) {
     logger.error("Credit debug failed", {

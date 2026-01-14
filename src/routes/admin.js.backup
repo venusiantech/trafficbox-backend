@@ -2,6 +2,7 @@ const express = require("express");
 const { requireRole } = require("../middleware/auth");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
+const Subscription = require("../models/Subscription");
 
 const router = express.Router();
 
@@ -15,8 +16,9 @@ router.get("/dashboard", requireRole("admin"), async (req, res) => {
       pausedCampaigns,
       sparkTrafficCampaigns,
       nineHitsCampaigns,
-      totalCredits,
-      totalAvailableHits,
+      totalSubscriptions,
+      activeSubscriptions,
+      subscriptionStats,
       recentUsers,
       recentCampaigns,
     ] = await Promise.all([
@@ -26,14 +28,22 @@ router.get("/dashboard", requireRole("admin"), async (req, res) => {
       Campaign.countDocuments({ state: "paused" }),
       Campaign.countDocuments({ spark_traffic_project_id: { $ne: null } }),
       Campaign.countDocuments({ nine_hits_campaign_id: { $ne: null } }),
-      User.aggregate([{ $group: { _id: null, total: { $sum: "$credits" } } }]),
-      User.aggregate([
-        { $group: { _id: null, total: { $sum: "$availableHits" } } },
+      Subscription.countDocuments(),
+      Subscription.countDocuments({ status: { $in: ["active", "trialing"] } }),
+      Subscription.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalVisitsUsed: { $sum: "$visitsUsed" },
+            totalVisitsIncluded: { $sum: "$visitsIncluded" },
+            avgVisitsUsed: { $avg: "$visitsUsed" },
+          },
+        },
       ]),
       User.find({})
         .sort({ createdAt: -1 })
         .limit(10)
-        .select("email firstName lastName createdAt credits availableHits"),
+        .select("email firstName lastName createdAt"),
       Campaign.find({})
         .sort({ createdAt: -1 })
         .limit(10)
@@ -46,8 +56,6 @@ router.get("/dashboard", requireRole("admin"), async (req, res) => {
         stats: {
           users: {
             total: totalUsers,
-            totalCredits: totalCredits[0]?.total || 0,
-            totalAvailableHits: totalAvailableHits[0]?.total || 0,
           },
           campaigns: {
             total: totalCampaigns,
@@ -55,6 +63,20 @@ router.get("/dashboard", requireRole("admin"), async (req, res) => {
             paused: pausedCampaigns,
             sparkTraffic: sparkTrafficCampaigns,
             nineHits: nineHitsCampaigns,
+          },
+          subscriptions: {
+            total: totalSubscriptions,
+            active: activeSubscriptions,
+            totalVisitsUsed: subscriptionStats[0]?.totalVisitsUsed || 0,
+            totalVisitsIncluded: subscriptionStats[0]?.totalVisitsIncluded || 0,
+            avgVisitsUsed: Math.round(subscriptionStats[0]?.avgVisitsUsed || 0),
+            utilizationRate: subscriptionStats[0]?.totalVisitsIncluded
+              ? Math.round(
+                  (subscriptionStats[0].totalVisitsUsed /
+                    subscriptionStats[0].totalVisitsIncluded) *
+                    100
+                )
+              : 0,
           },
         },
         recent: {
@@ -84,7 +106,7 @@ router.get("/users", requireRole("admin"), async (req, res) => {
       User.countDocuments(),
     ]);
 
-    // Get campaign counts for each user
+    // Get campaign counts and subscription info for each user
     const usersWithCampaigns = await Promise.all(
       users.map(async (user) => {
         const campaignCount = await Campaign.countDocuments({ user: user._id });
@@ -92,12 +114,24 @@ router.get("/users", requireRole("admin"), async (req, res) => {
           user: user._id,
           state: { $in: ["created", "ok", "running"] },
         });
+        const subscription = await Subscription.findOne({ user: user._id }).select(
+          "planName status visitsUsed visitsIncluded"
+        );
         return {
           ...user.toObject(),
           campaignStats: {
             total: campaignCount,
             active: activeCampaigns,
           },
+          subscription: subscription
+            ? {
+                planName: subscription.planName,
+                status: subscription.status,
+                visitsUsed: subscription.visitsUsed,
+                visitsIncluded: subscription.visitsIncluded,
+                availableVisits: subscription.visitsIncluded - subscription.visitsUsed,
+              }
+            : null,
         };
       })
     );
@@ -136,7 +170,7 @@ router.get("/campaigns", requireRole("admin"), async (req, res) => {
 
     const [campaigns, totalCampaigns] = await Promise.all([
       Campaign.find(filter)
-        .populate("user", "email firstName lastName credits availableHits")
+        .populate("user", "email firstName lastName")
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -191,75 +225,8 @@ router.get("/users/:userId", requireRole("admin"), async (req, res) => {
   }
 });
 
-// Update User Credits/Hits
-router.put("/users/:userId/credits", requireRole("admin"), async (req, res) => {
-  try {
-    // Support both 'credits'/'amount' and 'action' parameters
-    const credits = req.body.credits || req.body.amount;
-    const action = req.body.action || "set";
-
-    // Validate input
-    if (credits === undefined || credits === null) {
-      return res.status(400).json({
-        error: "Credits or amount is required",
-        example: { amount: 1000, action: "add" },
-      });
-    }
-
-    if (!["add", "subtract", "set"].includes(action)) {
-      return res.status(400).json({
-        error: "Action must be 'add', 'subtract', or 'set'",
-        receivedAction: action,
-      });
-    }
-
-    const user = await User.findById(req.params.userId);
-    if (!user) return res.status(404).json({ error: "User not found" });
-
-    const oldCredits = user.credits;
-    const oldHits = user.availableHits;
-
-    // Update credits based on action
-    if (action === "add") {
-      user.credits += credits;
-    } else if (action === "subtract") {
-      user.credits = Math.max(0, user.credits - credits);
-    } else {
-      // set
-      user.credits = Math.max(0, credits);
-    }
-
-    // Auto-calculate availableHits from credits (3 credits = 1 hit)
-    user.availableHits = Math.floor(user.credits / 3);
-
-    await user.save();
-
-    res.json({
-      ok: true,
-      message: `User credits/hits updated successfully`,
-      changes: {
-        credits: {
-          old: oldCredits,
-          new: user.credits,
-          change: user.credits - oldCredits,
-        },
-        availableHits: {
-          old: oldHits,
-          new: user.availableHits,
-          change: user.availableHits - oldHits,
-        },
-      },
-      user: {
-        id: user._id,
-        email: user.email,
-        credits: user.credits,
-        availableHits: user.availableHits,
-      },
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+// REMOVED: Credit management endpoint - System now uses subscription-based visit tracking
+// Use subscription management endpoints instead (/api/admin/subscriptions)
 
 // Transfer Alpha Campaign from one user to another (MUST be before the pause/resume route)
 router.post(
@@ -300,7 +267,7 @@ router.post(
 
       // Find target user
       const targetUser = await User.findById(targetUserId).select(
-        "email firstName lastName credits availableHits"
+        "email firstName lastName"
       );
       if (!targetUser) {
         return res.status(404).json({
@@ -352,7 +319,7 @@ router.post(
       // Populate the new owner details
       await campaign.populate(
         "user",
-        "email firstName lastName credits availableHits"
+        "email firstName lastName"
       );
 
       res.json({
@@ -371,8 +338,6 @@ router.post(
             userId: targetUser._id,
             email: targetUser.email,
             name: `${targetUser.firstName} ${targetUser.lastName}`.trim(),
-            credits: targetUser.credits,
-            availableHits: targetUser.availableHits,
           },
           transferredBy: {
             adminId: req.user.id,
@@ -582,17 +547,24 @@ router.get("/analytics", requireRole("admin"), async (req, res) => {
       // Campaign state distribution
       Campaign.aggregate([{ $group: { _id: "$state", count: { $sum: 1 } } }]),
 
-      // Credit usage stats
-      User.aggregate([
+      // Subscription usage stats (replaces legacy credit stats)
+      Subscription.aggregate([
         {
           $group: {
             _id: null,
-            totalCredits: { $sum: "$credits" },
-            totalHits: { $sum: "$availableHits" },
-            avgCredits: { $avg: "$credits" },
-            avgHits: { $avg: "$availableHits" },
-            minCredits: { $min: "$credits" },
-            maxCredits: { $max: "$credits" },
+            totalVisitsUsed: { $sum: "$visitsUsed" },
+            totalVisitsIncluded: { $sum: "$visitsIncluded" },
+            avgVisitsUsed: { $avg: "$visitsUsed" },
+            avgVisitsIncluded: { $avg: "$visitsIncluded" },
+            totalActiveSubscriptions: {
+              $sum: {
+                $cond: [
+                  { $in: ["$status", ["active", "trialing"]] },
+                  1,
+                  0,
+                ],
+              },
+            },
           },
         },
       ]),
@@ -608,7 +580,7 @@ router.get("/analytics", requireRole("admin"), async (req, res) => {
           vendors: vendorDistribution,
           states: stateDistribution,
         },
-        creditUsage: creditUsage[0] || {},
+        subscriptionUsage: creditUsage[0] || {},
       },
     });
   } catch (err) {
@@ -729,35 +701,7 @@ router.get("/archives/campaigns", requireRole("admin"), async (req, res) => {
   }
 });
 
-// Fix all users' availableHits calculation
-router.post("/fix-user-hits", requireRole("admin"), async (req, res) => {
-  try {
-    const users = await User.find({});
-    let fixedCount = 0;
-
-    for (const user of users) {
-      const correctHits = Math.floor(user.credits / 3);
-      if (user.availableHits !== correctHits) {
-        await User.findByIdAndUpdate(user._id, {
-          availableHits: correctHits,
-        });
-        fixedCount++;
-      }
-    }
-
-    res.json({
-      status: "success",
-      message: `Fixed availableHits for ${fixedCount} users`,
-      totalUsers: users.length,
-      fixedUsers: fixedCount,
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: error.message,
-    });
-  }
-});
+// REMOVED: Fix user hits endpoint - No longer needed with subscription-based system
 
 // Get transfer history for a campaign
 router.get(
@@ -879,7 +823,7 @@ router.get(
         Campaign.find({
           spark_traffic_project_id: { $exists: true, $ne: null },
         })
-          .populate("user", "email firstName lastName credits availableHits")
+          .populate("user", "email firstName lastName")
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(limit),
@@ -1325,7 +1269,7 @@ router.get("/subscriptions", requireRole("admin"), async (req, res) => {
 
     const [subscriptions, totalSubscriptions] = await Promise.all([
       Subscription.find(filter)
-        .populate("user", "email firstName lastName credits availableHits")
+        .populate("user", "email firstName lastName")
         .sort({ updatedAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -1356,8 +1300,6 @@ router.get("/subscriptions", requireRole("admin"), async (req, res) => {
             id: sub.user._id,
             email: sub.user.email,
             name: `${sub.user.firstName} ${sub.user.lastName}`.trim(),
-            credits: sub.user.credits,
-            availableHits: sub.user.availableHits,
           },
         };
       })
