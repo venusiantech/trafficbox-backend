@@ -509,9 +509,163 @@ router.post(
 
         case "checkout.session.completed": {
           const session = event.data.object;
-          if (session.mode === "subscription") {
+          
+          // Handle custom plan payment link completion
+          if (session.metadata?.isCustomPlanPayment === "true") {
+            const userId = session.metadata.userId;
+            const visitsIncluded = parseInt(session.metadata.visitsIncluded);
+            const campaignLimit = parseInt(session.metadata.campaignLimit);
+            const price = parseFloat(session.metadata.price);
+            const planDescription = session.metadata.description;
+            const durationDays = parseInt(session.metadata.durationDays) || 365;
+            const features = JSON.parse(session.metadata.features || '{}');
+            const reason = session.metadata.reason;
+            const adminAssignedBy = session.metadata.adminAssignedBy;
+            
+            logger.info("Custom plan payment completed", {
+              sessionId: session.id,
+              userId,
+              visitsIncluded,
+              campaignLimit,
+            });
+
+            try {
+              // Get Stripe customer ID from the session
+              const stripeCustomerId = session.customer;
+              
+              // Find existing subscription or create new one
+              let dbSubscription = await Subscription.findOne({ user: userId });
+              
+              if (dbSubscription) {
+                // Update existing subscription
+                dbSubscription.stripeCustomerId = stripeCustomerId;
+                dbSubscription.planName = "custom";
+                dbSubscription.status = "active";
+                dbSubscription.visitsIncluded = visitsIncluded;
+                dbSubscription.campaignLimit = campaignLimit;
+                dbSubscription.features = features;
+                dbSubscription.currentPeriodStart = new Date();
+                dbSubscription.currentPeriodEnd = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
+                dbSubscription.customPlanDetails = {
+                  price: price,
+                  description: planDescription,
+                  customFeatures: features,
+                };
+                dbSubscription.adminAssigned = true;
+                dbSubscription.lastModifiedBy = adminAssignedBy;
+                dbSubscription.lastModifiedAt = new Date();
+                dbSubscription.modificationReason = reason;
+                
+                await dbSubscription.save();
+                
+                logger.info("Existing subscription updated with custom plan", {
+                  subscriptionId: dbSubscription._id,
+                  userId,
+                });
+              } else {
+                // CREATE new subscription
+                dbSubscription = new Subscription({
+                  user: userId,
+                  stripeCustomerId: stripeCustomerId,
+                  planName: "custom",
+                  status: "active",
+                  visitsIncluded: visitsIncluded,
+                  campaignLimit: campaignLimit,
+                  visitsUsed: 0,
+                  features: features,
+                  currentPeriodStart: new Date(),
+                  currentPeriodEnd: new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000),
+                  customPlanDetails: {
+                    price: price,
+                    description: planDescription,
+                    customFeatures: features,
+                  },
+                  adminAssigned: true,
+                  assignedBy: adminAssignedBy,
+                  assignedAt: new Date(),
+                  assignmentReason: reason,
+                });
+                
+                await dbSubscription.save();
+                
+                logger.info("New subscription created with custom plan", {
+                  subscriptionId: dbSubscription._id,
+                  userId,
+                });
+              }
+
+              // Update pending payment record to succeeded and link to subscription
+              const Payment = require("../models/Payment");
+              const payment = await Payment.findOne({
+                user: userId,
+                status: "pending",
+                planName: "custom",
+                $or: [
+                  { "metadata.checkoutSessionId": session.id },
+                  { "metadata.checkoutSessionId": { $exists: true } },
+                  { "metadata.paymentLinkId": { $exists: true } }
+                ],
+              }).sort({ createdAt: -1 });
+
+              if (payment) {
+                payment.subscription = dbSubscription._id; // Link to the newly created subscription
+                payment.status = "succeeded";
+                payment.stripePaymentIntentId = session.payment_intent;
+                payment.processedAt = new Date();
+                payment.metadata = {
+                  ...payment.metadata,
+                  checkoutSessionId: session.id,
+                  paymentCompletedAt: new Date(),
+                  subscriptionCreated: true,
+                };
+                await payment.save();
+
+                logger.info("Payment record updated to succeeded and linked to subscription", {
+                  paymentId: payment._id,
+                  subscriptionId: dbSubscription._id,
+                  userId,
+                });
+              }
+
+              // Create success notification
+              const Notification = require("../models/Notification");
+              await new Notification({
+                user: userId,
+                type: "custom_plan_payment_completed",
+                title: "✅ Custom Plan Activated!",
+                message: `Your payment has been processed successfully! Your custom plan is now active.
+                
+Plan Details:
+• ${dbSubscription.campaignLimit} campaigns
+• ${dbSubscription.visitsIncluded.toLocaleString()} visits per month
+• Active until ${dbSubscription.currentPeriodEnd.toLocaleDateString()}
+
+Start creating campaigns now!`,
+                relatedId: dbSubscription._id,
+                relatedModel: "Subscription",
+                metadata: {
+                  paymentAmount: session.amount_total / 100,
+                  currency: session.currency.toUpperCase(),
+                  visitsIncluded: dbSubscription.visitsIncluded,
+                  campaignLimit: dbSubscription.campaignLimit,
+                },
+              }).save();
+
+              logger.info("Custom plan activation notification created", {
+                userId,
+                subscriptionId: dbSubscription._id,
+              });
+            } catch (activationError) {
+              logger.error("Failed to create custom plan subscription", {
+                error: activationError.message,
+                userId,
+                stack: activationError.stack,
+              });
+            }
+          } else if (session.mode === "subscription") {
+            // Regular subscription checkout
             const subscriptionId = session.subscription;
-            const userId = session.metadata?.userId; // Get userId from session metadata
+            const userId = session.metadata?.userId;
             const stripeSubscription =
               await stripe.subscriptions.retrieve(subscriptionId);
             

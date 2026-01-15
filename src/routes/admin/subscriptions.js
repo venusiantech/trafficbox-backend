@@ -3,6 +3,10 @@ const { requireRole } = require("../../middleware/auth");
 const User = require("../../models/User");
 const Subscription = require("../../models/Subscription");
 const Campaign = require("../../models/Campaign");
+const Payment = require("../../models/Payment");
+const Notification = require("../../models/Notification");
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
+const logger = require("../../utils/logger");
 
 const router = express.Router();
 
@@ -334,70 +338,270 @@ router.post("/users/:userId/custom", requireRole("admin"), async (req, res) => {
       ...(features || {}),
     };
 
-    // Find or create subscription
+    const duration = durationDays || 365; // Default 1 year
+    const planDescription = description || `Custom plan: ${campaignLimit} campaigns, ${visitsIncluded.toLocaleString()} visits`;
+
+    // Determine if payment is required (price > 0)
+    const requiresPayment = price > 0;
+
+    // Find existing subscription (we'll update it later after payment, or now if free)
     let subscription = await Subscription.findOne({ user: userId });
     const isNewSubscription = !subscription;
 
-    const duration = durationDays || 365; // Default 1 year
-
-    if (!subscription) {
-      // Create new subscription with custom plan
-      subscription = new Subscription({
-        user: userId,
-        stripeCustomerId:
-          user.stripeCustomerId || `admin_custom_${userId}`,
-        planName: "custom",
-        status: "active",
-        visitsIncluded: visitsIncluded,
-        campaignLimit: campaignLimit,
-        visitsUsed: 0,
-        features: customFeatures,
-        currentPeriodStart: new Date(),
-        currentPeriodEnd: new Date(
-          Date.now() + duration * 24 * 60 * 60 * 1000
-        ),
-        customPlanDetails: {
-          price: price,
-          description:
-            description || `Custom plan for ${user.email}`,
-          customFeatures: features || {},
-        },
-        adminAssigned: true,
-        assignedBy: req.user.id,
-        assignedAt: new Date(),
-        assignmentReason:
-          reason || "Admin assigned custom plan",
-      });
-    } else {
-      // Update existing subscription to custom plan
-      const oldPlan = subscription.planName;
-
-      subscription.planName = "custom";
-      subscription.status = "active";
-      subscription.visitsIncluded = visitsIncluded;
-      subscription.campaignLimit = campaignLimit;
-      subscription.features = customFeatures;
-      subscription.customPlanDetails = {
-        price: price,
-        description:
-          description || `Custom plan for ${user.email}`,
-        customFeatures: features || {},
-      };
-      subscription.adminAssigned = true;
-      subscription.lastModifiedBy = req.user.id;
-      subscription.lastModifiedAt = new Date();
-      subscription.modificationReason =
-        reason ||
-        `Admin changed plan from ${oldPlan} to custom plan`;
-
-      // Reset period
-      subscription.currentPeriodStart = new Date();
-      subscription.currentPeriodEnd = new Date(
-        Date.now() + duration * 24 * 60 * 60 * 1000
-      );
+    // Create or get Stripe customer
+    let stripeCustomerId = subscription?.stripeCustomerId || user.stripeCustomerId;
+    
+    // Check if it's a placeholder ID (starts with cus_free_ or admin_)
+    const isPlaceholderId = !stripeCustomerId || 
+                           stripeCustomerId.startsWith('cus_free_') || 
+                           stripeCustomerId.startsWith('admin_') ||
+                           stripeCustomerId.startsWith('admin_custom_') ||
+                           stripeCustomerId.startsWith('admin_assigned_');
+    
+    if (isPlaceholderId) {
+      try {
+        const customer = await stripe.customers.create({
+          email: user.email,
+          name: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+          metadata: {
+            userId: user._id.toString(),
+          },
+        });
+        stripeCustomerId = customer.id;
+        
+        logger.info("Stripe customer created for custom plan", {
+          userId: user._id,
+          customerId: stripeCustomerId,
+        });
+      } catch (stripeError) {
+        logger.error("Failed to create Stripe customer", {
+          userId: user._id,
+          error: stripeError.message,
+        });
+        return res.status(500).json({
+          error: "Failed to create payment customer",
+          details: stripeError.message,
+        });
+      }
     }
 
-    await subscription.save();
+    // Only create/update subscription if payment is NOT required (free plan)
+    // If payment is required, subscription will be created by webhook after payment
+    if (!requiresPayment) {
+      if (!subscription) {
+        // Create new FREE subscription
+        subscription = new Subscription({
+          user: userId,
+          stripeCustomerId: stripeCustomerId,
+          planName: "custom",
+          status: "active",
+          visitsIncluded: visitsIncluded,
+          campaignLimit: campaignLimit,
+          visitsUsed: 0,
+          features: customFeatures,
+          currentPeriodStart: new Date(),
+          currentPeriodEnd: new Date(Date.now() + duration * 24 * 60 * 60 * 1000),
+          customPlanDetails: {
+            price: price,
+            description: planDescription,
+            customFeatures: features || {},
+          },
+          adminAssigned: true,
+          assignedBy: req.user.id,
+          assignedAt: new Date(),
+          assignmentReason: reason || "Admin assigned free custom plan",
+        });
+      } else {
+        // Update existing subscription to FREE custom plan
+        const oldPlan = subscription.planName;
+        subscription.planName = "custom";
+        subscription.status = "active";
+        subscription.visitsIncluded = visitsIncluded;
+        subscription.campaignLimit = campaignLimit;
+        subscription.features = customFeatures;
+        subscription.stripeCustomerId = stripeCustomerId;
+        subscription.customPlanDetails = {
+          price: price,
+          description: planDescription,
+          customFeatures: features || {},
+        };
+        subscription.adminAssigned = true;
+        subscription.lastModifiedBy = req.user.id;
+        subscription.lastModifiedAt = new Date();
+        subscription.modificationReason =
+          reason || `Admin changed plan from ${oldPlan} to free custom plan`;
+        subscription.currentPeriodStart = new Date();
+        subscription.currentPeriodEnd = new Date(Date.now() + duration * 24 * 60 * 60 * 1000);
+      }
+
+      await subscription.save();
+    }
+
+    let paymentLink = null;
+    let pendingPayment = null;
+
+    // Create payment link and pending payment record if payment is required
+    if (requiresPayment) {
+      try {
+        // Create Stripe checkout session with ALL subscription details in metadata
+        // Subscription will be created by webhook AFTER payment
+        const paymentLinkData = await stripe.checkout.sessions.create({
+          customer: stripeCustomerId,
+          mode: "payment",
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+                product_data: {
+                  name: `Custom Plan - ${user.email}`,
+                  description: planDescription,
+                },
+                unit_amount: Math.round(price * 100), // Convert to cents
+              },
+              quantity: 1,
+            },
+          ],
+          metadata: {
+            userId: user._id.toString(),
+            planType: "custom",
+            isCustomPlanPayment: "true",
+            // Store ALL subscription details to create subscription after payment
+            visitsIncluded: visitsIncluded.toString(),
+            campaignLimit: campaignLimit.toString(),
+            price: price.toString(),
+            description: planDescription,
+            reason: reason || "Admin assigned custom plan",
+            durationDays: duration.toString(),
+            features: JSON.stringify(customFeatures),
+            adminAssignedBy: req.user.id.toString(),
+          },
+          success_url: `${process.env.FRONTEND_URL}/dashboard?payment=success&plan=custom&session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.FRONTEND_URL}/dashboard?payment=cancelled`,
+        });
+
+        paymentLink = paymentLinkData.url;
+
+        logger.info("Checkout session created for custom plan", {
+          userId: user._id,
+          subscriptionId: subscription._id,
+          amount: price,
+          checkoutSessionId: paymentLinkData.id,
+        });
+
+        // Create pending payment record (NO subscription reference yet - will be created after payment)
+        pendingPayment = new Payment({
+          user: userId,
+          subscription: null, // Will be set after subscription is created by webhook
+          stripeCustomerId: stripeCustomerId,
+          amount: Math.round(price * 100), // Store in cents
+          currency: "usd",
+          status: "pending",
+          type: "subscription",
+          planName: "custom",
+          description: `Custom plan payment: ${planDescription}`,
+          metadata: {
+            checkoutSessionId: paymentLinkData.id,
+            paymentLinkUrl: paymentLink,
+            visitsIncluded,
+            campaignLimit,
+            durationDays: duration,
+            price,
+            description: planDescription,
+            reason: reason || "Admin assigned custom plan",
+            features: customFeatures,
+            adminAssignedBy: req.user.id,
+          },
+        });
+
+        await pendingPayment.save();
+
+        logger.info("Pending payment record created", {
+          userId: user._id,
+          paymentId: pendingPayment._id,
+          amount: price,
+        });
+
+        // Create notification with payment link
+        const notification = new Notification({
+          user: userId,
+          type: "custom_plan_assigned_payment_pending",
+          title: "🎉 Custom Plan Assigned - Payment Required",
+          message: `A custom plan has been assigned to you! 
+          
+Plan Details:
+• ${campaignLimit} campaigns
+• ${visitsIncluded.toLocaleString()} visits per month
+• Valid for ${duration} days
+• Price: $${price}
+
+Click "Pay Now" to complete your payment and activate your plan.`,
+          relatedId: pendingPayment._id,
+          relatedModel: "Payment",
+          actionUrl: paymentLink,
+          actionLabel: "Pay Now",
+          metadata: {
+            amount: price,
+            currency: "USD",
+            visitsIncluded,
+            campaignLimit,
+            durationDays: duration,
+            checkoutSessionId: paymentLinkData.id,
+          },
+        });
+
+        await notification.save();
+
+        logger.info("Payment notification created", {
+          userId: user._id,
+          notificationId: notification._id,
+          paymentLink: paymentLink,
+        });
+      } catch (paymentError) {
+        logger.error("Failed to create payment link or notification", {
+          userId: user._id,
+          error: paymentError.message,
+        });
+        
+        // Rollback subscription status
+        subscription.status = "incomplete";
+        await subscription.save();
+        
+        return res.status(500).json({
+          error: "Failed to create payment link",
+          details: paymentError.message,
+        });
+      }
+    } else {
+      // No payment required - create success notification
+      const notification = new Notification({
+        user: userId,
+        type: "subscription",
+        title: "🎉 Custom Plan Activated",
+        message: `A free custom plan has been assigned to you!
+        
+Plan Details:
+• ${campaignLimit} campaigns
+• ${visitsIncluded.toLocaleString()} visits per month
+• Valid for ${duration} days
+
+Your plan is now active and ready to use!`,
+        relatedId: subscription._id,
+        relatedModel: "Subscription",
+        metadata: {
+          visitsIncluded,
+          campaignLimit,
+          durationDays: duration,
+        },
+      });
+
+      await notification.save();
+
+      logger.info("Free custom plan notification created", {
+        userId: user._id,
+        notificationId: notification._id,
+      });
+    }
 
     // Count current campaigns
     const currentCampaigns = await Campaign.countDocuments({
@@ -407,11 +611,14 @@ router.post("/users/:userId/custom", requireRole("admin"), async (req, res) => {
 
     res.json({
       ok: true,
-      message: isNewSubscription
-        ? `Custom subscription assigned successfully to ${user.email}`
-        : `Subscription updated to custom plan for ${user.email}`,
+      message: requiresPayment
+        ? `Custom plan assigned to ${user.email}. Payment required to activate.`
+        : `Free custom plan activated for ${user.email}`,
       action: isNewSubscription ? "created" : "updated",
-      subscription: {
+      requiresPayment,
+      paymentLink: requiresPayment ? paymentLink : null,
+      paymentAmount: requiresPayment ? price : 0,
+      subscription: subscription ? {
         planName: subscription.planName,
         status: subscription.status,
         visitsIncluded: subscription.visitsIncluded,
@@ -429,7 +636,20 @@ router.post("/users/:userId/custom", requireRole("admin"), async (req, res) => {
           (isNewSubscription
             ? "Admin assigned custom plan"
             : "Admin updated to custom plan"),
+      } : {
+        // Subscription will be created after payment
+        planName: "custom",
+        status: "pending_payment",
+        visitsIncluded: visitsIncluded,
+        campaignLimit: campaignLimit,
+        message: "Subscription will be created after payment is completed",
       },
+      payment: pendingPayment ? {
+        id: pendingPayment._id,
+        status: pendingPayment.status,
+        amount: price,
+        currency: "USD",
+      } : null,
       user: {
         id: user._id,
         email: user.email,
@@ -439,6 +659,10 @@ router.post("/users/:userId/custom", requireRole("admin"), async (req, res) => {
     });
   } catch (error) {
     console.error("Error assigning custom subscription:", error);
+    logger.error("Failed to assign custom subscription", {
+      error: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({
       error: "Failed to assign custom subscription",
       details: error.message,
