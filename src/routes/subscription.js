@@ -633,6 +633,37 @@ router.post(
                 payment.status = "succeeded";
                 payment.stripePaymentIntentId = session.payment_intent;
                 payment.processedAt = new Date();
+                
+                // Get invoice details from the session
+                try {
+                  if (session.invoice) {
+                    const invoice = await stripe.invoices.retrieve(session.invoice);
+                    payment.stripeInvoiceId = invoice.id;
+                    payment.invoiceUrl = invoice.hosted_invoice_url;
+                    payment.receiptUrl = invoice.invoice_pdf;
+                    
+                    logger.info("Invoice details retrieved", {
+                      invoiceId: invoice.id,
+                      invoiceUrl: invoice.hosted_invoice_url,
+                    });
+                  } else if (session.payment_intent) {
+                    // For payment mode, there might not be an invoice, but we can get receipt from payment intent
+                    const paymentIntent = await stripe.paymentIntents.retrieve(session.payment_intent);
+                    if (paymentIntent.charges && paymentIntent.charges.data.length > 0) {
+                      payment.receiptUrl = paymentIntent.charges.data[0].receipt_url;
+                      
+                      logger.info("Receipt URL retrieved from payment intent", {
+                        receiptUrl: paymentIntent.charges.data[0].receipt_url,
+                      });
+                    }
+                  }
+                } catch (invoiceError) {
+                  logger.error("Failed to retrieve invoice/receipt details", {
+                    error: invoiceError.message,
+                  });
+                  // Don't fail the whole process if invoice retrieval fails
+                }
+                
                 payment.metadata = {
                   ...payment.metadata,
                   checkoutSessionId: session.id,
@@ -645,6 +676,8 @@ router.post(
                   paymentId: payment._id,
                   subscriptionId: dbSubscription._id,
                   userId,
+                  hasInvoice: !!payment.stripeInvoiceId,
+                  hasReceipt: !!payment.receiptUrl,
                 });
               }
 
