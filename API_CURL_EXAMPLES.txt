@@ -1,0 +1,690 @@
+================================================================================
+FORMS & NOTIFICATIONS API - CURL EXAMPLES WITH SAMPLE RESPONSES
+================================================================================
+
+Base URL: http://localhost:5001/api
+Test User: a@gmail.com / aaaa1234
+Test Admin: testadmin@trafficbox.com / Test@1234
+
+================================================================================
+AUTHENTICATION ENDPOINTS
+================================================================================
+
+1. LOGIN (Get JWT Token)
+--------------------------------------------------------------------------------
+curl -X POST http://localhost:5001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "a@gmail.com",
+    "password": "aaaa1234"
+  }'
+
+RESPONSE:
+{
+  "success": true,
+  "message": "Login successful",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "695e37dcf993ecadbc137a82",
+    "email": "a@gmail.com",
+    "firstName": "AA",
+    "lastName": "AA",
+    "role": "user",
+    "cashBalance": 0
+  }
+}
+
+2. ADMIN LOGIN
+--------------------------------------------------------------------------------
+curl -X POST http://localhost:5001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "testadmin@trafficbox.com",
+    "password": "Test@1234"
+  }'
+
+RESPONSE:
+{
+  "success": true,
+  "message": "Login successful",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": "6968942b2b656a541ddc6ce3",
+    "email": "testadmin@trafficbox.com",
+    "firstName": "Test",
+    "lastName": "Admin",
+    "role": "admin",
+    "cashBalance": 0
+  }
+}
+
+
+================================================================================
+USER FORM SUBMISSION ENDPOINTS
+================================================================================
+
+3. SUBMIT CUSTOM PLAN REQUEST (WITH JWT)
+--------------------------------------------------------------------------------
+curl -X POST http://localhost:5001/api/forms/custom-plan-request \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "email": "a@gmail.com",
+    "campaignCount": 15,
+    "creditLimit": "10M",
+    "additionalNotes": "Need support for international campaigns with priority support"
+  }'
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Custom plan request submitted successfully. Our team will contact you soon.",
+  "request": {
+    "id": "696893ea2b656a541ddbfe13",
+    "campaignCount": 15,
+    "creditLimit": "10M",
+    "status": "pending",
+    "createdAt": "2026-01-15T07:14:50.261Z"
+  }
+}
+
+4. SUBMIT CUSTOM PLAN REQUEST (WITHOUT JWT - just email)
+--------------------------------------------------------------------------------
+curl -X POST http://localhost:5001/api/forms/custom-plan-request \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "a@gmail.com",
+    "campaignCount": 5,
+    "creditLimit": "2M",
+    "additionalNotes": "Small business plan needed"
+  }'
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Custom plan request submitted successfully. Our team will contact you soon.",
+  "request": {
+    "id": "696893eb2b656a541ddbfe18",
+    "campaignCount": 5,
+    "creditLimit": "2M",
+    "status": "pending",
+    "createdAt": "2026-01-15T07:14:51.662Z"
+  }
+}
+
+5. GET USER'S OWN CUSTOM PLAN REQUESTS
+--------------------------------------------------------------------------------
+curl -X GET http://localhost:5001/api/forms/custom-plan-request \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "requests": [
+    {
+      "_id": "696893eb2b656a541ddbfe18",
+      "campaignCount": 5,
+      "creditLimit": "2M",
+      "additionalNotes": "Small business plan needed",
+      "status": "pending",
+      "createdAt": "2026-01-15T07:14:51.662Z",
+      "updatedAt": "2026-01-15T07:14:51.662Z"
+    },
+    {
+      "_id": "696893ea2b656a541ddbfe13",
+      "campaignCount": 15,
+      "creditLimit": "10M",
+      "additionalNotes": "Need support for international campaigns",
+      "status": "approved",
+      "createdAt": "2026-01-15T07:14:50.261Z",
+      "updatedAt": "2026-01-15T07:16:20.543Z"
+    }
+  ]
+}
+
+6. SUBMIT CONTACT US MESSAGE (WITH JWT)
+--------------------------------------------------------------------------------
+curl -X POST http://localhost:5001/api/forms/contact-us \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "fullName": "Test User A",
+    "email": "a@gmail.com",
+    "subject": "Question about enterprise pricing",
+    "message": "I am interested in learning more about your enterprise plans."
+  }'
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Thank you for contacting us! We will get back to you soon.",
+  "messageId": "696893ec2b656a541ddbfe1c"
+}
+
+7. SUBMIT CONTACT US MESSAGE (WITHOUT JWT - as guest)
+--------------------------------------------------------------------------------
+curl -X POST http://localhost:5001/api/forms/contact-us \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fullName": "John Doe",
+    "email": "a@gmail.com",
+    "subject": "Technical issue with campaign",
+    "message": "I am experiencing some issues with my campaign. Please help!"
+  }'
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Thank you for contacting us! We will get back to you soon.",
+  "messageId": "696893ee2b656a541ddbfe21"
+}
+
+
+================================================================================
+USER NOTIFICATION ENDPOINTS
+================================================================================
+
+8. GET USER'S NOTIFICATIONS
+--------------------------------------------------------------------------------
+curl -X GET http://localhost:5001/api/notifications \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "notifications": [
+    {
+      "_id": "6968943f2b656a541ddc6d0d",
+      "user": "695e37dcf993ecadbc137a82",
+      "type": "contact_us_submitted",
+      "title": "Contact Message Received",
+      "message": "We received your message: \"Technical issue with campaign\". Our team will respond soon.",
+      "relatedId": "6968943f2b656a541ddc6d0b",
+      "relatedModel": "ContactUsMessage",
+      "isRead": false,
+      "createdAt": "2026-01-15T07:16:15.771Z",
+      "updatedAt": "2026-01-15T07:16:15.771Z"
+    },
+    {
+      "_id": "6968943b2b656a541ddc6cf9",
+      "user": "695e37dcf993ecadbc137a82",
+      "type": "custom_plan_request_submitted",
+      "title": "Custom Plan Request Submitted",
+      "message": "Your custom plan request for 15 campaigns with 10M visits has been submitted successfully.",
+      "relatedId": "6968943b2b656a541ddc6cf7",
+      "relatedModel": "CustomPlanRequest",
+      "isRead": false,
+      "createdAt": "2026-01-15T07:16:11.776Z",
+      "updatedAt": "2026-01-15T07:16:11.776Z"
+    }
+  ],
+  "pagination": {
+    "total": 14,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1
+  },
+  "unreadCount": 14
+}
+
+9. GET USER'S NOTIFICATIONS (with pagination and filter)
+--------------------------------------------------------------------------------
+curl -X GET "http://localhost:5001/api/notifications?page=1&limit=10&isRead=false" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+RESPONSE: (same structure as above, but filtered for unread only)
+
+10. GET UNREAD NOTIFICATION COUNT
+--------------------------------------------------------------------------------
+curl -X GET http://localhost:5001/api/notifications/unread-count \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "unreadCount": 14
+}
+
+11. MARK NOTIFICATION AS READ
+--------------------------------------------------------------------------------
+curl -X PUT http://localhost:5001/api/notifications/6968943f2b656a541ddc6d0d/read \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Notification marked as read",
+  "notification": {
+    "_id": "6968943f2b656a541ddc6d0d",
+    "user": "695e37dcf993ecadbc137a82",
+    "type": "contact_us_submitted",
+    "title": "Contact Message Received",
+    "message": "We received your message: \"Technical issue with campaign\".",
+    "isRead": true,
+    "readAt": "2026-01-15T07:16:47.184Z",
+    "createdAt": "2026-01-15T07:16:15.771Z",
+    "updatedAt": "2026-01-15T07:16:47.184Z"
+  }
+}
+
+12. MARK ALL NOTIFICATIONS AS READ
+--------------------------------------------------------------------------------
+curl -X PUT http://localhost:5001/api/notifications/read-all \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "All notifications marked as read",
+  "updatedCount": 13
+}
+
+13. DELETE A NOTIFICATION
+--------------------------------------------------------------------------------
+curl -X DELETE http://localhost:5001/api/notifications/6968943f2b656a541ddc6d0d \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Notification deleted successfully"
+}
+
+
+================================================================================
+ADMIN MAILBOX ENDPOINTS
+================================================================================
+
+14. GET ADMIN MAILBOX OVERVIEW
+--------------------------------------------------------------------------------
+curl -X GET http://localhost:5001/api/admin/mailbox/overview \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "overview": {
+    "customPlanRequests": {
+      "total": 4,
+      "pending": 4,
+      "recent": [
+        {
+          "_id": "6968943d2b656a541ddc6cfe",
+          "user": {
+            "_id": "695e37dcf993ecadbc137a82",
+            "email": "a@gmail.com",
+            "firstName": "AA",
+            "lastName": "AA"
+          },
+          "campaignCount": 5,
+          "creditLimit": "2M",
+          "additionalNotes": "Small business plan needed",
+          "status": "pending",
+          "adminNotes": "",
+          "createdAt": "2026-01-15T07:16:13.017Z",
+          "updatedAt": "2026-01-15T07:16:13.017Z"
+        }
+      ]
+    },
+    "contactUsMessages": {
+      "total": 4,
+      "new": 4,
+      "recent": [
+        {
+          "_id": "6968943f2b656a541ddc6d0b",
+          "user": {
+            "_id": "695e37dcf993ecadbc137a82",
+            "email": "a@gmail.com",
+            "firstName": "AA",
+            "lastName": "AA"
+          },
+          "fullName": "Test User A",
+          "email": "a@gmail.com",
+          "subject": "Technical issue with campaign",
+          "message": "I am experiencing some issues.",
+          "status": "new",
+          "adminNotes": "",
+          "createdAt": "2026-01-15T07:16:15.694Z",
+          "updatedAt": "2026-01-15T07:16:15.694Z"
+        }
+      ]
+    }
+  }
+}
+
+15. GET ALL CUSTOM PLAN REQUESTS (Admin)
+--------------------------------------------------------------------------------
+curl -X GET http://localhost:5001/api/admin/mailbox/custom-plan-requests \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "requests": [
+    {
+      "_id": "6968943d2b656a541ddc6cfe",
+      "user": {
+        "_id": "695e37dcf993ecadbc137a82",
+        "email": "a@gmail.com",
+        "firstName": "AA",
+        "lastName": "AA"
+      },
+      "campaignCount": 5,
+      "creditLimit": "2M",
+      "additionalNotes": "Small business plan needed",
+      "status": "pending",
+      "adminNotes": "",
+      "reviewedBy": null,
+      "reviewedAt": null,
+      "createdAt": "2026-01-15T07:16:13.017Z",
+      "updatedAt": "2026-01-15T07:16:13.017Z"
+    }
+  ],
+  "pagination": {
+    "total": 4,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1
+  },
+  "statusCounts": {
+    "pending": 4,
+    "approved": 0,
+    "reviewed": 0,
+    "rejected": 0
+  }
+}
+
+16. GET CUSTOM PLAN REQUESTS WITH FILTERS
+--------------------------------------------------------------------------------
+curl -X GET "http://localhost:5001/api/admin/mailbox/custom-plan-requests?status=pending&page=1&limit=10" \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN"
+
+RESPONSE: (same structure as above, but filtered)
+
+17. UPDATE CUSTOM PLAN REQUEST STATUS (Approve)
+--------------------------------------------------------------------------------
+curl -X PUT http://localhost:5001/api/admin/mailbox/custom-plan-requests/6968943b2b656a541ddc6cf7 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN" \
+  -d '{
+    "status": "approved",
+    "adminNotes": "Approved! We will create a custom 10M plan. Our team will contact you within 24 hours."
+  }'
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Request updated successfully",
+  "request": {
+    "_id": "6968943b2b656a541ddc6cf7",
+    "user": {
+      "_id": "695e37dcf993ecadbc137a82",
+      "email": "a@gmail.com",
+      "firstName": "AA",
+      "lastName": "AA"
+    },
+    "campaignCount": 15,
+    "creditLimit": "10M",
+    "status": "approved",
+    "adminNotes": "Approved! We will create a custom 10M plan.",
+    "reviewedBy": {
+      "_id": "6968942b2b656a541ddc6ce3",
+      "email": "testadmin@trafficbox.com",
+      "firstName": "Test",
+      "lastName": "Admin"
+    },
+    "reviewedAt": "2026-01-15T07:16:20.543Z",
+    "createdAt": "2026-01-15T07:16:11.622Z",
+    "updatedAt": "2026-01-15T07:16:20.543Z"
+  }
+}
+
+18. UPDATE CUSTOM PLAN REQUEST STATUS (Reject)
+--------------------------------------------------------------------------------
+curl -X PUT http://localhost:5001/api/admin/mailbox/custom-plan-requests/696893eb2b656a541ddbfe18 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN" \
+  -d '{
+    "status": "rejected",
+    "adminNotes": "We cannot accommodate this request at this time. Please contact support."
+  }'
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Request updated successfully",
+  "request": {
+    "_id": "696893eb2b656a541ddbfe18",
+    "status": "rejected",
+    "adminNotes": "We cannot accommodate this request at this time.",
+    "reviewedBy": {
+      "_id": "6968942b2b656a541ddc6ce3",
+      "email": "testadmin@trafficbox.com"
+    },
+    "reviewedAt": "2026-01-15T07:17:30.123Z"
+  }
+}
+
+19. DELETE CUSTOM PLAN REQUEST
+--------------------------------------------------------------------------------
+curl -X DELETE http://localhost:5001/api/admin/mailbox/custom-plan-requests/696893ea2b656a541ddbfe13 \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Request deleted successfully"
+}
+
+20. GET ALL CONTACT US MESSAGES (Admin)
+--------------------------------------------------------------------------------
+curl -X GET http://localhost:5001/api/admin/mailbox/contact-us-messages \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "messages": [
+    {
+      "_id": "6968943f2b656a541ddc6d0b",
+      "user": {
+        "_id": "695e37dcf993ecadbc137a82",
+        "email": "a@gmail.com",
+        "firstName": "AA",
+        "lastName": "AA"
+      },
+      "fullName": "Test User A",
+      "email": "a@gmail.com",
+      "subject": "Technical issue with campaign",
+      "message": "I am experiencing some issues with my campaign. Please help!",
+      "status": "new",
+      "adminNotes": "",
+      "repliedBy": null,
+      "repliedAt": null,
+      "createdAt": "2026-01-15T07:16:15.694Z",
+      "updatedAt": "2026-01-15T07:16:15.694Z"
+    }
+  ],
+  "pagination": {
+    "total": 4,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1
+  },
+  "statusCounts": {
+    "new": 4,
+    "read": 0,
+    "replied": 0,
+    "archived": 0
+  }
+}
+
+21. GET CONTACT US MESSAGES WITH FILTERS
+--------------------------------------------------------------------------------
+curl -X GET "http://localhost:5001/api/admin/mailbox/contact-us-messages?status=new&page=1&limit=10" \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN"
+
+RESPONSE: (same structure as above, but filtered)
+
+22. UPDATE CONTACT US MESSAGE STATUS (Mark as Replied)
+--------------------------------------------------------------------------------
+curl -X PUT http://localhost:5001/api/admin/mailbox/contact-us-messages/696894522b656a541ddca623 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN" \
+  -d '{
+    "status": "replied",
+    "adminNotes": "Responded via email with detailed information and scheduled a demo call."
+  }'
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Message updated successfully",
+  "data": {
+    "_id": "696894522b656a541ddca623",
+    "user": {
+      "_id": "695e37dcf993ecadbc137a82",
+      "email": "a@gmail.com",
+      "firstName": "AA",
+      "lastName": "AA"
+    },
+    "fullName": "Test User A",
+    "email": "a@gmail.com",
+    "subject": "Technical issue with campaign",
+    "message": "I am experiencing some issues.",
+    "status": "replied",
+    "adminNotes": "Responded via email with detailed information.",
+    "repliedBy": {
+      "_id": "6968942b2b656a541ddc6ce3",
+      "email": "testadmin@trafficbox.com",
+      "firstName": "Test",
+      "lastName": "Admin"
+    },
+    "repliedAt": "2026-01-15T07:16:34.321Z",
+    "createdAt": "2026-01-15T07:16:26.612Z",
+    "updatedAt": "2026-01-15T07:16:34.321Z"
+  }
+}
+
+23. UPDATE CONTACT US MESSAGE STATUS (Mark as Read)
+--------------------------------------------------------------------------------
+curl -X PUT http://localhost:5001/api/admin/mailbox/contact-us-messages/6968943e2b656a541ddc6d04 \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN" \
+  -d '{
+    "status": "read",
+    "adminNotes": "Reviewing this inquiry"
+  }'
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Message updated successfully",
+  "data": {
+    "_id": "6968943e2b656a541ddc6d04",
+    "status": "read",
+    "adminNotes": "Reviewing this inquiry"
+  }
+}
+
+24. DELETE CONTACT US MESSAGE
+--------------------------------------------------------------------------------
+curl -X DELETE http://localhost:5001/api/admin/mailbox/contact-us-messages/696893ec2b656a541ddbfe1c \
+  -H "Authorization: Bearer ADMIN_JWT_TOKEN"
+
+RESPONSE:
+{
+  "ok": true,
+  "message": "Message deleted successfully"
+}
+
+
+================================================================================
+STATUS VALUES REFERENCE
+================================================================================
+
+CUSTOM PLAN REQUEST STATUSES:
+- "pending"   - User submitted, waiting for review
+- "reviewed"  - Admin has seen it
+- "approved"  - Approved, custom plan being created
+- "rejected"  - Not approved
+
+CONTACT US MESSAGE STATUSES:
+- "new"       - Just received
+- "read"      - Admin has read it
+- "replied"   - Admin responded to user
+- "archived"  - Closed/archived
+
+NOTIFICATION TYPES:
+- "custom_plan_request_submitted"  - User submitted custom plan request
+- "custom_plan_request_updated"    - Admin updated request status
+- "contact_us_submitted"           - User submitted contact message
+- "contact_us_replied"             - Admin replied to message
+
+
+================================================================================
+ERROR RESPONSES
+================================================================================
+
+AUTHENTICATION ERROR:
+{
+  "error": "Invalid credentials"
+}
+
+VALIDATION ERROR:
+{
+  "error": "Email is required"
+}
+
+NOT FOUND ERROR:
+{
+  "error": "Notification not found"
+}
+
+UNAUTHORIZED ERROR:
+{
+  "error": "Unauthorized"
+}
+
+INVALID STATUS ERROR:
+{
+  "error": "Invalid status"
+}
+
+
+================================================================================
+TIPS & NOTES
+================================================================================
+
+1. TOKEN USAGE:
+   - Get JWT token by logging in first
+   - Include token in Authorization header: "Bearer YOUR_JWT_TOKEN"
+   - Admin endpoints require admin role
+
+2. OPTIONAL AUTHENTICATION:
+   - Custom plan request works with OR without JWT
+   - Contact us works with OR without JWT
+   - If email matches existing user, automatically linked
+
+3. AUTOMATIC NOTIFICATIONS:
+   - Created when user submits form
+   - Created when admin updates status (approved, rejected, replied)
+   - User can view, mark as read, or delete
+
+4. PAGINATION:
+   - Default: page=1, limit=20
+   - Max limit: 20 items per page
+   - Use ?page=2&limit=10 for custom pagination
+
+5. FILTERING:
+   - Custom plan requests: ?status=pending
+   - Contact messages: ?status=new
+   - Notifications: ?isRead=false
+
+6. SORTING:
+   - Default: newest first (createdAt desc)
+   - Use ?sortBy=createdAt&sortOrder=asc for oldest first
+
+================================================================================
+END OF DOCUMENTATION
+================================================================================

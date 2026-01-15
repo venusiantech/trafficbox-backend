@@ -57,7 +57,9 @@ router.get("/subscription", requireRole(), async (req, res) => {
  */
 router.get("/plans", async (req, res) => {
   try {
-    const plans = ["free", "starter", "growth", "business", "custom"/*, "premium"*/].map(
+    // Premium plan is commented out - no longer available for purchase
+    // Custom plans are only available through admin approval
+    const plans = ["free", "starter", "growth", "business", /* "premium", */ "custom"].map(
       (planName) => {
         const config = Subscription.getPlanConfig(planName);
         return {
@@ -101,7 +103,15 @@ router.post("/checkout", requireRole(), async (req, res) => {
       });
     }
 
-    const validPlans = ["starter", "growth", "business"/*, "premium"*/];
+    // Premium plan is no longer available for direct purchase
+    // Custom plans are only assigned by admin after request approval
+    const validPlans = ["starter", "growth", "business" /* "premium" */];
+    
+    if (planName === "custom") {
+      return res.status(400).json({
+        error: "Custom plans are not available for direct purchase. Please submit a custom plan request.",
+      });
+    }
     if (!validPlans.includes(planName)) {
       return res.status(400).json({
         error: "Invalid plan name",
@@ -153,7 +163,15 @@ router.post("/upgrade", requireRole(), async (req, res) => {
       });
     }
 
-    const validPlans = ["starter", "growth", "business"/*, "premium"*/];
+    // Premium plan is no longer available for direct purchase
+    const validPlans = ["starter", "growth", "business" /* "premium" */];
+    
+    if (planName === "custom") {
+      return res.status(400).json({
+        error: "Custom plans cannot be purchased directly. Please submit a custom plan request.",
+      });
+    }
+    
     if (!validPlans.includes(planName)) {
       return res.status(400).json({
         error: "Invalid plan name",
@@ -1067,8 +1085,8 @@ function getPlanDescription(planName) {
     starter: "Great for individuals and small businesses",
     growth: "Ideal for growing businesses with multiple campaigns",
     business: "For established businesses with high traffic needs",
-    premium: "Enterprise-level solution with full features and support",
-    custom: "Tailored plan based on your specific requirements - contact us for custom pricing",
+    // premium: "Enterprise-level solution with full features and support", // No longer available
+    custom: "Tailored solution designed specifically for your business needs. Contact us to discuss your requirements.",
   };
 
   return descriptions[planName] || "";

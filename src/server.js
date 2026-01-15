@@ -71,6 +71,8 @@ app.get("/", (req, res) => {
       admin: "/api/admin",
       blogs: "/api/blogs", // Blog management routes
       subscription: "/api/subscription", // Stripe subscription management
+      forms: "/api/forms", // Contact forms and custom plan requests
+      notifications: "/api/notifications", // User notifications
     },
     documentation: "/api-docs",
   });
@@ -103,6 +105,8 @@ app.use("/api/websites", require("./routes/websites"));
 app.use("/api/admin", require("./routes/admin"));
 app.use("/api/blogs", require("./routes/blogs")); // Blog management routes
 app.use("/api/subscription", require("./routes/subscription")); // Stripe subscription routes
+app.use("/api/forms", require("./routes/forms")); // Contact forms and custom plan requests
+app.use("/api/notifications", require("./routes/notifications")); // User notifications
 
 // Start sync worker
 require("./sync/syncWorker")();
