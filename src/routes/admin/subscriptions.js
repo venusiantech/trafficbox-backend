@@ -484,9 +484,9 @@ router.post("/users/:userId/custom", requireRole("admin"), async (req, res) => {
 
         logger.info("Checkout session created for custom plan", {
           userId: user._id,
-          subscriptionId: subscription._id,
           amount: price,
           checkoutSessionId: paymentLinkData.id,
+          metadata: paymentLinkData.metadata,
         });
 
         // Create pending payment record (NO subscription reference yet - will be created after payment)

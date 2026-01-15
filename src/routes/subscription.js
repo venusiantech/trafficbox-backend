@@ -513,20 +513,41 @@ router.post(
           // Handle custom plan payment link completion
           if (session.metadata?.isCustomPlanPayment === "true") {
             const userId = session.metadata.userId;
-            const visitsIncluded = parseInt(session.metadata.visitsIncluded);
-            const campaignLimit = parseInt(session.metadata.campaignLimit);
+            
+            // Log raw metadata for debugging
+            logger.info("Raw session metadata", {
+              metadata: session.metadata,
+            });
+            
+            // Parse with validation
+            const visitsIncluded = parseInt(session.metadata.visitsIncluded, 10);
+            const campaignLimit = parseInt(session.metadata.campaignLimit, 10);
             const price = parseFloat(session.metadata.price);
             const planDescription = session.metadata.description;
-            const durationDays = parseInt(session.metadata.durationDays) || 365;
+            const durationDays = parseInt(session.metadata.durationDays, 10) || 365;
             const features = JSON.parse(session.metadata.features || '{}');
             const reason = session.metadata.reason;
             const adminAssignedBy = session.metadata.adminAssignedBy;
+            
+            // Validate parsed values
+            if (isNaN(visitsIncluded) || isNaN(campaignLimit) || isNaN(price)) {
+              logger.error("Invalid metadata values", {
+                visitsIncluded: session.metadata.visitsIncluded,
+                campaignLimit: session.metadata.campaignLimit,
+                price: session.metadata.price,
+                parsedVisitsIncluded: visitsIncluded,
+                parsedCampaignLimit: campaignLimit,
+                parsedPrice: price,
+              });
+              throw new Error("Invalid metadata: visits, campaign limit, or price is NaN");
+            }
             
             logger.info("Custom plan payment completed", {
               sessionId: session.id,
               userId,
               visitsIncluded,
               campaignLimit,
+              price,
             });
 
             try {

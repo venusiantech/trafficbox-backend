@@ -11,7 +11,7 @@ const paymentSchema = new mongoose.Schema(
     subscription: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Subscription",
-      required: true,
+      required: false, // Optional - may be null for pending custom plan payments until subscription is created
     },
     
     // Stripe identifiers
