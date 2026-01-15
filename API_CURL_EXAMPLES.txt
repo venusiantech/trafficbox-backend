@@ -465,7 +465,122 @@ RESPONSE:
   }
 }
 
-19. DELETE CUSTOM PLAN REQUEST
+19. ASSIGN CUSTOM PLAN WITH PAYMENT (Admin) - NEW FLOW
+curl -X POST http://localhost:5001/api/admin/subscriptions/users/USER_ID_HERE/custom \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "visitsIncluded": 500000,
+    "campaignLimit": 5,
+    "price": 299,
+    "description": "Custom enterprise plan for your business",
+    "reason": "Approved custom plan request",
+    "durationDays": 365,
+    "features": {
+      "countryTargeting": "advanced",
+      "trafficSources": "unlimited",
+      "behaviorSettings": "full-suite",
+      "campaignRenewal": "fully-automated",
+      "support": "24-7-priority",
+      "analytics": "realtime-api"
+    }
+  }'
+
+Response:
+{
+  "ok": true,
+  "message": "Custom plan assigned to user@example.com. Payment link sent.",
+  "action": "created",
+  "requiresPayment": true,
+  "paymentLink": "https://buy.stripe.com/...",
+  "paymentAmount": 299,
+  "subscription": {
+    "planName": "custom",
+    "status": "incomplete",
+    "visitsIncluded": 500000,
+    "campaignLimit": 5,
+    "features": {
+      "countryTargeting": "advanced",
+      "trafficSources": "unlimited",
+      "behaviorSettings": "full-suite"
+    },
+    "customPlanDetails": {
+      "price": 299,
+      "description": "Custom enterprise plan for your business"
+    }
+  },
+  "payment": {
+    "id": "65f...",
+    "status": "pending",
+    "amount": 299,
+    "currency": "USD"
+  }
+}
+
+20. ASSIGN FREE CUSTOM PLAN (Admin) - NO PAYMENT REQUIRED
+curl -X POST http://localhost:5001/api/admin/subscriptions/users/USER_ID_HERE/custom \
+  -H "Authorization: Bearer YOUR_ADMIN_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "visitsIncluded": 100000,
+    "campaignLimit": 3,
+    "price": 0,
+    "description": "Free custom plan for partnership",
+    "reason": "Partnership agreement"
+  }'
+
+Response:
+{
+  "ok": true,
+  "message": "Free custom plan activated for user@example.com",
+  "action": "created",
+  "requiresPayment": false,
+  "paymentLink": null,
+  "paymentAmount": 0,
+  "subscription": {
+    "planName": "custom",
+    "status": "active",
+    "visitsIncluded": 100000,
+    "campaignLimit": 3,
+    "currentPeriodStart": "2026-01-15T10:00:00.000Z",
+    "currentPeriodEnd": "2027-01-15T10:00:00.000Z"
+  },
+  "payment": null
+}
+
+21. GET USER NOTIFICATIONS (Check for Payment Link)
+curl -X GET http://localhost:5001/api/notifications \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+Response (with payment notification):
+{
+  "ok": true,
+  "notifications": [
+    {
+      "_id": "65f...",
+      "user": "65e...",
+      "type": "custom_plan_assigned_payment_pending",
+      "title": "🎉 Custom Plan Assigned - Payment Required",
+      "message": "A custom plan has been assigned to you!\n\nPlan Details:\n• 5 campaigns\n• 500,000 visits per month\n• Valid for 365 days\n• Price: $299\n\nClick \"Pay Now\" to complete your payment and activate your plan.",
+      "relatedId": "payment_id",
+      "relatedModel": "Payment",
+      "actionUrl": "https://buy.stripe.com/...",
+      "actionLabel": "Pay Now",
+      "metadata": {
+        "amount": 299,
+        "currency": "USD",
+        "visitsIncluded": 500000,
+        "campaignLimit": 5,
+        "durationDays": 365
+      },
+      "isRead": false,
+      "createdAt": "2026-01-15T10:00:00.000Z"
+    }
+  ],
+  "unreadCount": 1
+}
+
+22. DELETE CUSTOM PLAN REQUEST
 --------------------------------------------------------------------------------
 curl -X DELETE http://localhost:5001/api/admin/mailbox/custom-plan-requests/696893ea2b656a541ddbfe13 \
   -H "Authorization: Bearer ADMIN_JWT_TOKEN"
