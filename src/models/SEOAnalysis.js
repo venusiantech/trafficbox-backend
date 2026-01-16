@@ -24,8 +24,24 @@ const seoAnalysisSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Lightweight performance scores (extracted from report)
+    // SEO Analysis breakdown scores (from overall_score.breakdown)
     scores: {
+      meta: { type: Number, min: 0, max: 100 },
+      content: { type: Number, min: 0, max: 100 },
+      technical: { type: Number, min: 0, max: 100 },
+      performance: { type: Number, min: 0, max: 100 },
+      mobile: { type: Number, min: 0, max: 100 },
+      security: { type: Number, min: 0, max: 100 },
+      accessibility: { type: Number, min: 0, max: 100 },
+    },
+    
+    // Overall SEO score
+    totalScore: { type: Number, min: 0, max: 100 },
+    grade: { type: String }, // A, B, C, D, F
+    scoreStatus: { type: String }, // excellent, good, average, poor
+    
+    // Lighthouse scores (separate from SEO breakdown)
+    lighthouseScores: {
       performance: { type: Number, min: 0, max: 100 },
       accessibility: { type: Number, min: 0, max: 100 },
       bestPractices: { type: Number, min: 0, max: 100 },
@@ -114,8 +130,14 @@ seoAnalysisSchema.index({ url: 1, createdAt: -1 });
 seoAnalysisSchema.index({ analysisId: 1 });
 seoAnalysisSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 }); // TTL index
 
-// Virtual for frontend-friendly response
+// Virtual for frontend-friendly response (use totalScore if available)
 seoAnalysisSchema.virtual("overallScore").get(function () {
+  // Use totalScore if available (from overall_score.total)
+  if (this.totalScore !== null && this.totalScore !== undefined) {
+    return Math.round(this.totalScore);
+  }
+  
+  // Fallback to average of breakdown scores
   const scores = this.scores;
   const validScores = Object.values(scores).filter(
     (score) => score !== null && score !== undefined

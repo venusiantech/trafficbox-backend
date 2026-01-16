@@ -6,6 +6,7 @@ const {
   isS3Configured,
   buildSignedS3Paths,
   getSignedUrl,
+  getJSONFromS3,
 } = require("./s3Service");
 const logger = require("../utils/logger");
 
@@ -53,6 +54,12 @@ async function processAndStoreSEOAnalysis(
       analysisId
     );
 
+    // Remove heavy unnecessary sections (robots-txt details with HTML)
+    if (cleanedResponse?.data?.performance?.lighthouse?.core_web_vitals?.["robots-txt"]?.details?.items) {
+      delete cleanedResponse.data.performance.lighthouse.core_web_vitals["robots-txt"].details.items;
+      logger.info("Removed robots-txt details items to reduce payload size", { analysisId });
+    }
+
     // Upload full cleaned report to S3
     const reportFileName = `${analysisId}-full-report.json`;
     const fullReportS3 = await uploadJSONToS3(
@@ -62,7 +69,7 @@ async function processAndStoreSEOAnalysis(
     );
 
     // Extract lightweight scores and metrics
-    const scores = extractScores(cleanedResponse);
+    const scoresData = extractScores(cleanedResponse);
     const metrics = extractMetrics(cleanedResponse);
     const backlinkCount = extractBacklinkCount(cleanedResponse);
 
@@ -80,7 +87,11 @@ async function processAndStoreSEOAnalysis(
       user: userId,
       analysisId,
       url,
-      scores,
+      scores: scoresData.scores,
+      totalScore: scoresData.totalScore,
+      grade: scoresData.grade,
+      scoreStatus: scoresData.scoreStatus,
+      lighthouseScores: scoresData.lighthouseScores,
       metrics,
       includeBacklinks,
       backlinkCount,
@@ -123,7 +134,11 @@ async function processAndStoreSEOAnalysis(
     return {
       analysisId,
       url,
-      scores,
+      scores: scoresData.scores,
+      totalScore: scoresData.totalScore,
+      grade: scoresData.grade,
+      scoreStatus: scoresData.scoreStatus,
+      lighthouseScores: scoresData.lighthouseScores,
       metrics,
       backlinkCount,
       status: "completed",
@@ -350,48 +365,70 @@ function isBase64Image(str) {
 }
 
 /**
- * Extract performance scores from AI response
+ * Extract SEO scores from AI response
  * Optimized for Addy.com API response structure
  * @param {Object} response
  * @returns {Object}
  */
 function extractScores(response) {
-  const scores = {
-    performance: null,
-    accessibility: null,
-    bestPractices: null,
-    seo: null,
-    pwa: null,
-    overall: null,
+  const result = {
+    scores: {
+      meta: null,
+      content: null,
+      technical: null,
+      performance: null,
+      mobile: null,
+      security: null,
+      accessibility: null,
+    },
+    totalScore: null,
+    grade: null,
+    scoreStatus: null,
+    lighthouseScores: {
+      performance: null,
+      accessibility: null,
+      bestPractices: null,
+      seo: null,
+      pwa: null,
+    },
   };
 
   try {
-    // Extract from Addy.com structure
+    // Extract SEO breakdown scores from overall_score
+    if (response?.data?.overall_score) {
+      const overallScore = response.data.overall_score;
+      
+      // Total score, grade, and status
+      result.totalScore = overallScore.total || null;
+      result.grade = overallScore.grade || null;
+      result.scoreStatus = overallScore.status || null;
+      
+      // Breakdown scores
+      if (overallScore.breakdown) {
+        const breakdown = overallScore.breakdown;
+        result.scores.meta = breakdown.meta || null;
+        result.scores.content = breakdown.content || null;
+        result.scores.technical = breakdown.technical || null;
+        result.scores.performance = breakdown.performance || null;
+        result.scores.mobile = breakdown.mobile || null;
+        result.scores.security = breakdown.security || null;
+        result.scores.accessibility = breakdown.accessibility || null;
+      }
+    }
+    
+    // Extract Lighthouse scores separately
     if (response?.data?.performance?.lighthouse) {
       const lighthouse = response.data.performance.lighthouse;
-      scores.performance = lighthouse.performance_score || null;
-      scores.accessibility = lighthouse.accessibility_score || null;
-      scores.bestPractices = lighthouse.best_practices_score || null;
-      scores.seo = lighthouse.seo_score || null;
-    }
-    
-    // Extract overall score
-    if (response?.data?.overall_score) {
-      scores.overall = response.data.overall_score.total || null;
-    }
-    
-    // Extract category scores as fallback
-    if (response?.data?.category_scores && !scores.performance) {
-      const catScores = response.data.category_scores;
-      scores.performance = catScores.performance || null;
-      scores.accessibility = catScores.accessibility || null;
-      scores.seo = catScores.seo || null;
+      result.lighthouseScores.performance = lighthouse.performance_score || null;
+      result.lighthouseScores.accessibility = lighthouse.accessibility_score || null;
+      result.lighthouseScores.bestPractices = lighthouse.best_practices_score || null;
+      result.lighthouseScores.seo = lighthouse.seo_score || null;
     }
   } catch (error) {
     logger.warn("Failed to extract scores", { error: error?.message || error });
   }
 
-  return scores;
+  return result;
 }
 
 /**
@@ -508,8 +545,35 @@ async function getSEOAnalysisById(analysisId, userId) {
 
   // Attach signed URLs on demand
   const signedPaths = await buildSignedS3Paths(analysis.s3Paths);
+  
+  // Fetch full report JSON from S3
+  let fullReportData = null;
+  try {
+    if (analysis.s3Paths?.fullReportJson?.key) {
+      fullReportData = await getJSONFromS3(analysis.s3Paths.fullReportJson.key);
+      logger.info("Full report JSON fetched from S3", { analysisId: analysis.analysisId });
+    }
+  } catch (error) {
+    logger.warn("Failed to fetch full report JSON from S3", { 
+      analysisId: analysis.analysisId, 
+      error: error.message 
+    });
+  }
+  
   const obj = analysis.toObject();
-  obj.s3Paths = signedPaths;
+  
+  // Rename s3Paths to data and restructure
+  obj.data = {
+    fullReportJson: fullReportData, // Include the actual JSON content
+    lighthouseScreenshot: signedPaths.lighthouseScreenshot,
+    additionalImages: signedPaths.additionalImages.map(img => ({
+      signedUrl: img.signedUrl // Only keep signedUrl, remove key and url
+    }))
+  };
+  
+  // Remove the old s3Paths key
+  delete obj.s3Paths;
+  
   return obj;
 }
 
@@ -533,7 +597,7 @@ async function getUserSEOAnalyses(userId, options = {}) {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .select("analysisId url status overallScore scores.performance scores.accessibility scores.bestPractices scores.seo includeBacklinks backlinkCount createdAt processingTime"), // Only main fields for list view
+      .select("analysisId url status totalScore grade scoreStatus scores includeBacklinks backlinkCount createdAt processingTime"), // Only main fields for list view
     SEOAnalysis.countDocuments(query),
   ]);
 

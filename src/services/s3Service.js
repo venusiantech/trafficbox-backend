@@ -170,6 +170,30 @@ async function getSignedUrl(fileKey, expiresIn = 3600) {
   }
 }
 
+/**
+ * Fetch JSON object from S3
+ * @param {String} fileKey - S3 object key
+ * @returns {Promise<Object>} - Parsed JSON object
+ */
+async function getJSONFromS3(fileKey) {
+  try {
+    const params = {
+      Bucket: S3_BUCKET,
+      Key: fileKey,
+    };
+
+    const result = await s3.getObject(params).promise();
+    const jsonString = result.Body.toString("utf-8");
+    return JSON.parse(jsonString);
+  } catch (error) {
+    logger.error("Failed to fetch JSON from S3", {
+      error: error?.message || error,
+      fileKey,
+    });
+    throw new Error(`Failed to fetch JSON from S3: ${error.message}`);
+  }
+}
+
 // Helper: return a signed URL for an S3 path object or passthrough if no key
 async function toSignedUrl(item, expiresIn = 3600) {
   if (!item) return null;
@@ -221,6 +245,7 @@ module.exports = {
   uploadJSONToS3,
   deleteFromS3,
   getSignedUrl,
+  getJSONFromS3,
   isS3Configured,
   buildSignedS3Paths,
 };
