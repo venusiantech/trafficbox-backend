@@ -473,7 +473,7 @@ router.post("/ai/seo-analysis-pro", authenticateJWT, async (req, res) => {
       });
     }
 
-    const { url, includeBacklinks } = req.body || {};
+    const { url, includeBacklinks: includeBacklinksParam } = req.body || {};
     if (!url) {
       return res.status(400).json({
         status: "error",
@@ -491,6 +491,9 @@ router.post("/ai/seo-analysis-pro", authenticateJWT, async (req, res) => {
       });
     }
 
+    // Set default value for includeBacklinks to true
+    const includeBacklinks = includeBacklinksParam !== undefined ? includeBacklinksParam : true;
+
     logger.info("SEO analysis PRO requested", {
       userId: req.user.id,
       url,
@@ -500,7 +503,7 @@ router.post("/ai/seo-analysis-pro", authenticateJWT, async (req, res) => {
     // Call Addy.com AI API
     const payload = {
       url,
-      includeBacklinks: includeBacklinks || false,
+      includeBacklinks,
     };
 
     const aiResponse = await axios.post(

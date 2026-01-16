@@ -488,13 +488,19 @@ function extractBacklinkCount(response) {
 }
 
 /**
- * Get SEO analysis by ID
- * @param {String} analysisId
+ * Get SEO analysis by ID (supports both MongoDB _id and analysisId UUID)
+ * @param {String} analysisId - Can be MongoDB _id or analysisId (UUID)
  * @param {String} userId
  * @returns {Promise<Object>}
  */
 async function getSEOAnalysisById(analysisId, userId) {
-  const analysis = await SEOAnalysis.findOne({ analysisId, user: userId });
+  // Try to find by analysisId (UUID) first, then by MongoDB _id
+  let analysis = await SEOAnalysis.findOne({ analysisId, user: userId });
+  
+  if (!analysis) {
+    // Try MongoDB _id as fallback
+    analysis = await SEOAnalysis.findOne({ _id: analysisId, user: userId });
+  }
 
   if (!analysis) {
     throw new Error("SEO analysis not found");
@@ -527,7 +533,7 @@ async function getUserSEOAnalyses(userId, options = {}) {
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
-      .select("-s3Paths.fullReportJson"), // Exclude full report URL for listing
+      .select("analysisId url status overallScore scores.performance scores.accessibility scores.bestPractices scores.seo includeBacklinks backlinkCount createdAt processingTime"), // Only main fields for list view
     SEOAnalysis.countDocuments(query),
   ]);
 
