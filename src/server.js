@@ -109,6 +109,7 @@ app.use("/api/blogs", require("./routes/blogs")); // Blog management routes
 app.use("/api/subscription", require("./routes/subscription")); // Stripe subscription routes
 app.use("/api/forms", require("./routes/forms")); // Contact forms and custom plan requests
 app.use("/api/notifications", require("./routes/notifications")); // User notifications
+app.use("/api/statistics", require("./routes/statistics")); // Aggregated statistics
 
 // Start sync worker
 require("./sync/syncWorker")();
