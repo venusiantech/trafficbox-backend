@@ -328,6 +328,109 @@ router.post("/cancel", requireRole(), async (req, res) => {
 });
 
 /**
+ * Immediately cancel subscription and reset user to free tier
+ */
+router.post("/reset-to-free", requireRole(), async (req, res) => {
+  try {
+    const subscription = await Subscription.findOne({ user: req.user.id });
+
+    if (!subscription) {
+      return res.status(404).json({ error: "No subscription found" });
+    }
+
+    if (subscription.planName === "free") {
+      return res.status(400).json({ error: "Already on the free plan" });
+    }
+
+    const previousPlan = subscription.planName;
+
+    // Cancel immediately on Stripe if there is an active subscription
+    if (subscription.stripeSubscriptionId) {
+      try {
+        await stripe.subscriptions.cancel(subscription.stripeSubscriptionId);
+        logger.info("Stripe subscription canceled immediately", {
+          userId: req.user.id,
+          stripeSubscriptionId: subscription.stripeSubscriptionId,
+        });
+      } catch (stripeErr) {
+        // If Stripe says it's already canceled, continue resetting locally
+        if (stripeErr.code !== "resource_missing") {
+          logger.error("Failed to cancel Stripe subscription", {
+            userId: req.user.id,
+            stripeSubscriptionId: subscription.stripeSubscriptionId,
+            error: stripeErr.message,
+          });
+          return res.status(500).json({
+            error: "Failed to cancel subscription on Stripe",
+            message: stripeErr.message,
+          });
+        }
+      }
+    }
+
+    // Reset subscription to free tier
+    const freeConfig = Subscription.getPlanConfig("free");
+    subscription.planName = "free";
+    subscription.status = "active";
+    subscription.stripeSubscriptionId = null;
+    subscription.stripePriceId = null;
+    subscription.stripeProductId = null;
+    subscription.visitsIncluded = freeConfig.visitsIncluded;
+    subscription.visitsUsed = 0;
+    subscription.campaignLimit = freeConfig.campaignLimit;
+    subscription.features = freeConfig.features;
+    subscription.cancelAtPeriodEnd = false;
+    subscription.canceledAt = new Date();
+    subscription.currentPeriodStart = new Date();
+    subscription.currentPeriodEnd = null;
+    subscription.adminAssigned = false;
+    subscription.customPlanDetails = undefined;
+    await subscription.save();
+
+    // Log a payment record for the forced cancellation
+    const Payment = require("../models/Payment");
+    try {
+      await Payment.createLifecycleEvent("canceled", subscription, req.user.id, {
+        cancelAtPeriodEnd: false,
+        canceledBy: "user_reset_to_free",
+        previousPlan,
+        canceledAt: new Date(),
+      });
+    } catch (paymentError) {
+      logger.error("Failed to create reset-to-free payment record", {
+        userId: req.user.id,
+        error: paymentError.message,
+      });
+    }
+
+    logger.info("User subscription reset to free tier", {
+      userId: req.user.id,
+      previousPlan,
+    });
+
+    res.json({
+      ok: true,
+      message: "Subscription canceled and reset to free plan immediately",
+      subscription: {
+        planName: subscription.planName,
+        status: subscription.status,
+        visitsIncluded: subscription.visitsIncluded,
+        campaignLimit: subscription.campaignLimit,
+      },
+    });
+  } catch (error) {
+    logger.error("Reset to free failed", {
+      userId: req.user.id,
+      error: error.message,
+    });
+    res.status(500).json({
+      error: "Failed to reset subscription to free",
+      message: error.message,
+    });
+  }
+});
+
+/**
  * Reactivate canceled subscription
  */
 router.post("/reactivate", requireRole(), async (req, res) => {
