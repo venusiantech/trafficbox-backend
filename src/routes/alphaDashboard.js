@@ -91,6 +91,8 @@ router.get("/overview", requireRole(), async (req, res) => {
     const campaignPerformance = [];
     const allUniqueCountries = new Set(); // Track all unique countries across campaigns
     const timeRangeMetricsAggregated = {};
+    // Store campaign geo configs for fallback country estimation
+    const campaignGeoConfigs = [];
 
     campaignMetricsResults.forEach(({ campaign, currentMetrics }) => {
       if (!currentMetrics) return;
@@ -138,12 +140,23 @@ router.get("/overview", requireRole(), async (req, res) => {
                 hits: 0,
                 visits: 0,
                 views: 0,
+                uniqueVisitors: 0,
               };
               existing.hits += country.hits || 0;
               existing.visits += country.visits || 0;
               existing.views += country.views || 0;
+              existing.uniqueVisitors += country.uniqueVisitors || 0;
               countryMap.set(country.country, existing);
             }
+          });
+        }
+
+        // Store geo config for fallback estimation if no traffic breakdown available
+        if (Array.isArray(campaign.countries) && campaign.countries.length > 0) {
+          campaignGeoConfigs.push({
+            totalHits: campaignTotalHits,
+            totalVisits: campaignTotalVisits,
+            countries: campaign.countries,
           });
         }
       }
@@ -260,30 +273,40 @@ router.get("/overview", requireRole(), async (req, res) => {
     // Calculate averages
     const averageSpeed = validDataCount > 0 ? speedSum / validDataCount : 0;
 
-    // Convert country map to sorted array (from traffic data) - only country codes
-    const topCountriesFromTraffic = Array.from(countryMap.entries())
-      .sort(([, a], [, b]) => b.hits - a.hits)
-      .slice(0, 10)
-      .map(([country]) => country);
+    // If countryMap has no traffic breakdown data, estimate from campaign geo configs
+    if (countryMap.size === 0 && campaignGeoConfigs.length > 0) {
+      campaignGeoConfigs.forEach(({ totalHits, totalVisits, countries }) => {
+        countries.forEach((geo) => {
+          const code = typeof geo === "string" ? geo : geo.country;
+          const percent = typeof geo === "object" ? (geo.percent || 0) : (1 / countries.length);
+          if (!code) return;
+          const existing = countryMap.get(code) || { hits: 0, visits: 0, views: 0, uniqueVisitors: 0 };
+          existing.hits += Math.round(totalHits * percent);
+          existing.visits += Math.round(totalVisits * percent);
+          existing.views += Math.round(totalVisits * percent);
+          countryMap.set(code, existing);
+        });
+      });
+    }
 
-    // Create comprehensive country list including all unique countries from campaigns - only country codes
-    const allCountriesList = Array.from(allUniqueCountries)
-      .map((country) => {
-        const trafficData = countryMap.get(country);
-        return {
-          country,
-          hits: trafficData?.hits || 0,
-        };
-      })
+    // Build topCountries with full stats (hits, visits, views, uniqueVisitors)
+    const topCountries = Array.from(countryMap.entries())
+      .map(([country, stats]) => ({
+        country,
+        hits: stats.hits,
+        visits: stats.visits,
+        views: stats.views,
+        uniqueVisitors: stats.uniqueVisitors,
+      }))
       .sort((a, b) => b.hits - a.hits)
-      .slice(0, 10)
-      .map((item) => item.country);
+      .slice(0, 10);
 
-    // Use traffic-based countries if available, otherwise use all countries from campaigns
-    const topCountries =
-      topCountriesFromTraffic.length > 0
-        ? topCountriesFromTraffic
-        : allCountriesList;
+    // If still empty, fall back to country codes from campaign config with zeros
+    if (topCountries.length === 0 && allUniqueCountries.size > 0) {
+      Array.from(allUniqueCountries)
+        .slice(0, 10)
+        .forEach((country) => topCountries.push({ country, hits: 0, visits: 0, views: 0, uniqueVisitors: 0 }));
+    }
 
     res.json({
       ok: true,
