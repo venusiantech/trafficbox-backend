@@ -70,7 +70,7 @@ async function sendSubscriptionCancelledEmail(user, subscription) {
     {
       firstName: user.firstName || "there",
       planName: subscription.planName,
-      canceledAt: subscription.canceledAt || new Date(),
+      activeUntil: subscription.currentPeriodEnd || subscription.activeUntil || null,
     }
   );
 }

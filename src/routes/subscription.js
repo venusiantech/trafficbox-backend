@@ -315,6 +315,15 @@ router.post("/cancel", requireRole(), async (req, res) => {
       cancelAtPeriodEnd,
     });
 
+    User.findById(req.user.id).select("email firstName").then((cancelUser) => {
+      if (cancelUser) {
+        sendSubscriptionCancelledEmail(cancelUser, {
+          planName: subscription.planName,
+          currentPeriodEnd: subscription.currentPeriodEnd,
+        }).catch(() => {});
+      }
+    }).catch(() => {});
+
     res.json({
       ok: true,
       message: cancelAtPeriodEnd
@@ -419,6 +428,15 @@ router.post("/reset-to-free", requireRole(), async (req, res) => {
       userId: req.user.id,
       previousPlan,
     });
+
+    User.findById(req.user.id).select("email firstName").then((resetUser) => {
+      if (resetUser) {
+        sendSubscriptionCancelledEmail(resetUser, {
+          planName: previousPlan,
+          currentPeriodEnd: null,
+        }).catch(() => {});
+      }
+    }).catch(() => {});
 
     res.json({
       ok: true,
@@ -658,7 +676,10 @@ router.post(
 
             const cancelledUser = await User.findById(dbSubscription.user).select("email firstName");
             if (cancelledUser) {
-              sendSubscriptionCancelledEmail(cancelledUser, dbSubscription).catch(() => {});
+              sendSubscriptionCancelledEmail(cancelledUser, {
+                planName: dbSubscription.planName,
+                currentPeriodEnd: null,
+              }).catch(() => {});
             }
 
             logger.info("Subscription canceled from webhook", {
