@@ -1,6 +1,7 @@
 const express = require("express");
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const { sendWelcomeEmail } = require("../services/emailService");
 const router = express.Router();
 
 // Register
@@ -12,6 +13,7 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "Email already registered" });
     const user = new User({ email, password, firstName, lastName, dob });
     await user.save();
+    sendWelcomeEmail(user).catch(() => {});
     // Generate JWT token after registration
     const token = jwt.sign(
       { id: user._id, role: user.role },

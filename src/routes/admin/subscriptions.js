@@ -7,6 +7,7 @@ const Payment = require("../../models/Payment");
 const Notification = require("../../models/Notification");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const logger = require("../../utils/logger");
+const { sendCustomPlanEmail } = require("../../services/emailService");
 
 const router = express.Router();
 
@@ -557,6 +558,16 @@ Click "Pay Now" to complete your payment and activate your plan.`,
           notificationId: notification._id,
           paymentLink: paymentLink,
         });
+
+        // Send email with payment link
+        sendCustomPlanEmail(user, {
+          visitsIncluded,
+          campaignLimit,
+          durationDays: duration,
+          price,
+          description: planDescription,
+          paymentLink,
+        }).catch(() => {});
       } catch (paymentError) {
         logger.error("Failed to create payment link or notification", {
           userId: user._id,
@@ -601,6 +612,16 @@ Your plan is now active and ready to use!`,
         userId: user._id,
         notificationId: notification._id,
       });
+
+      // Send email for free custom plan activation
+      sendCustomPlanEmail(user, {
+        visitsIncluded,
+        campaignLimit,
+        durationDays: duration,
+        price: 0,
+        description: planDescription,
+        paymentLink: null,
+      }).catch(() => {});
     }
 
     // Count current campaigns

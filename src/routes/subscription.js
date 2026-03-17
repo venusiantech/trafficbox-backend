@@ -11,10 +11,22 @@ const {
   setDefaultPaymentMethod,
   removePaymentMethod,
   createCustomerPortalSession,
+  mapPriceIdToPlan,
 } = require("../services/stripeService");
 const Subscription = require("../models/Subscription");
+const User = require("../models/User");
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const logger = require("../utils/logger");
+const {
+  sendSubscriptionStartedEmail,
+  sendSubscriptionCancelledEmail,
+  sendChargebackEmail,
+  sendUpgradeEmail,
+  sendDowngradeEmail,
+  sendCustomPlanEmail,
+} = require("../services/emailService");
+
+const PLAN_ORDER = ["free", "starter", "growth", "business", "premium", "custom"];
 
 const router = express.Router();
 
@@ -551,6 +563,48 @@ router.post(
             }
           }
           
+          // Send email for new subscription or plan change
+          if (event.type === "customer.subscription.created") {
+            const createdDbSub = await Subscription.findOne({ stripeSubscriptionId: subscription.id });
+            if (createdDbSub) {
+              const subUser = await User.findById(createdDbSub.user).select("email firstName");
+              if (subUser) {
+                sendSubscriptionStartedEmail(subUser, createdDbSub).catch(() => {});
+              }
+            }
+          } else if (event.type === "customer.subscription.updated") {
+            const prevItems = event.data.previous_attributes?.items?.data;
+            const oldPriceId = prevItems?.[0]?.price?.id;
+            const newPriceId = subscription.items?.data?.[0]?.price?.id;
+
+            if (oldPriceId && newPriceId && oldPriceId !== newPriceId) {
+              const oldPlan = mapPriceIdToPlan(oldPriceId);
+              const newPlan = mapPriceIdToPlan(newPriceId);
+
+              if (oldPlan && newPlan && oldPlan !== newPlan) {
+                const updatedDbSub = await Subscription.findOne({ stripeSubscriptionId: subscription.id });
+                if (updatedDbSub) {
+                  const subUser = await User.findById(updatedDbSub.user).select("email firstName");
+                  if (subUser) {
+                    const payload = {
+                      oldPlan,
+                      newPlan,
+                      visitsIncluded: updatedDbSub.visitsIncluded,
+                      campaignLimit: updatedDbSub.campaignLimit,
+                      currentPeriodEnd: updatedDbSub.currentPeriodEnd,
+                    };
+                    const isUpgrade = PLAN_ORDER.indexOf(newPlan) > PLAN_ORDER.indexOf(oldPlan);
+                    if (isUpgrade) {
+                      sendUpgradeEmail(subUser, payload).catch(() => {});
+                    } else {
+                      sendDowngradeEmail(subUser, payload).catch(() => {});
+                    }
+                  }
+                }
+              }
+            }
+          }
+
           logger.info("Subscription synced from webhook", {
             eventType: event.type,
             subscriptionId: subscription.id,
@@ -600,6 +654,11 @@ router.post(
                 subscriptionId: subscription.id,
                 error: paymentError.message,
               });
+            }
+
+            const cancelledUser = await User.findById(dbSubscription.user).select("email firstName");
+            if (cancelledUser) {
+              sendSubscriptionCancelledEmail(cancelledUser, dbSubscription).catch(() => {});
             }
 
             logger.info("Subscription canceled from webhook", {
@@ -812,6 +871,19 @@ Start creating campaigns now!`,
                 userId,
                 subscriptionId: dbSubscription._id,
               });
+
+              // Send custom plan activated email
+              const customPlanUser = await User.findById(userId).select("email firstName");
+              if (customPlanUser) {
+                sendCustomPlanEmail(customPlanUser, {
+                  visitsIncluded: dbSubscription.visitsIncluded,
+                  campaignLimit: dbSubscription.campaignLimit,
+                  durationDays,
+                  price,
+                  description: planDescription,
+                  paymentLink: null,
+                }).catch(() => {});
+              }
             } catch (activationError) {
               logger.error("Failed to create custom plan subscription", {
                 error: activationError.message,
@@ -861,6 +933,19 @@ Start creating campaigns now!`,
                 invoiceId: invoice.id,
                 error: paymentError.message,
               });
+            }
+          }
+
+          if (dbSubscription) {
+            const invoiceUser = await User.findById(dbSubscription.user).select("email firstName");
+            if (invoiceUser) {
+              sendSubscriptionStartedEmail(invoiceUser, {
+                planName: dbSubscription.planName,
+                amount: invoice.amount_paid,
+                visitsIncluded: dbSubscription.visitsIncluded,
+                campaignLimit: dbSubscription.campaignLimit,
+                currentPeriodEnd: dbSubscription.currentPeriodEnd,
+              }).catch(() => {});
             }
           }
 
@@ -963,6 +1048,16 @@ Start creating campaigns now!`,
                 disputeId: dispute.id,
                 error: paymentError.message,
               });
+            }
+
+            const disputeUser = await User.findById(dbSubscription.user).select("email firstName");
+            if (disputeUser) {
+              sendChargebackEmail(disputeUser, {
+                amount: dispute.amount,
+                currency: dispute.currency,
+                reason: dispute.reason,
+                id: dispute.id,
+              }).catch(() => {});
             }
           }
           break;
