@@ -9,8 +9,41 @@ router.post("/register", async (req, res) => {
   try {
     const { email, password, firstName, lastName, dob } = req.body;
     const exists = await User.findOne({ email });
-    if (exists)
+
+    if (exists) {
+      // If this user was created via lead-capture, complete their registration
+      if (exists.isLeadCapture) {
+        exists.password = password;
+        exists.firstName = firstName || exists.firstName;
+        exists.lastName = lastName || exists.lastName;
+        exists.dob = dob || exists.dob;
+        exists.isLeadCapture = false;
+        await exists.save();
+        sendWelcomeEmail(exists).catch(() => {});
+        const token = jwt.sign(
+          { id: exists._id, role: exists.role },
+          process.env.JWT_SECRET,
+          { expiresIn: "7d" }
+        );
+        return res.json({
+          success: true,
+          message: "Account activated successfully",
+          token,
+          user: {
+            id: exists._id,
+            email: exists.email,
+            firstName: exists.firstName,
+            lastName: exists.lastName,
+            dob: exists.dob,
+            role: exists.role,
+            cashBalance: exists.cashBalance,
+            createdAt: exists.createdAt,
+          },
+        });
+      }
       return res.status(400).json({ error: "Email already registered" });
+    }
+
     const user = new User({ email, password, firstName, lastName, dob });
     await user.save();
     sendWelcomeEmail(user).catch(() => {});

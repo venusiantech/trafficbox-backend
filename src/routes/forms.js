@@ -1,11 +1,14 @@
 const express = require("express");
+const crypto = require("crypto");
 const { requireRole } = require("../middleware/auth");
 const CustomPlanRequest = require("../models/CustomPlanRequest");
 const ContactUsMessage = require("../models/ContactUsMessage");
 const Notification = require("../models/Notification");
 const User = require("../models/User");
+const Website = require("../models/Website");
 const logger = require("../utils/logger");
 const jwt = require("jsonwebtoken");
+const { sendLeadCaptureEmail } = require("../services/emailService");
 
 const router = express.Router();
 
@@ -233,6 +236,82 @@ router.post("/contact-us", optionalAuth, async (req, res) => {
       error: error.message,
     });
     res.status(500).json({ error: "Failed to submit message" });
+  }
+});
+
+/**
+ * Lead Capture Form
+ * POST /api/forms/lead-capture
+ * Accepts email + websiteUrl from the landing page "Get free visits" form.
+ * Creates a passwordless user (isLeadCapture: true), saves the website,
+ * and sends an email telling them to complete signup to activate.
+ */
+router.post("/lead-capture", async (req, res) => {
+  try {
+    const { email, websiteUrl } = req.body;
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      return res.status(400).json({ error: "Invalid email address" });
+    }
+
+    if (!websiteUrl || !websiteUrl.trim()) {
+      return res.status(400).json({ error: "Website URL is required" });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedUrl = websiteUrl.trim();
+
+    let user = await User.findOne({ email: normalizedEmail });
+
+    if (user && !user.isLeadCapture) {
+      return res.status(400).json({
+        ok: false,
+        error: "You are already registered. Please log in to your account.",
+        alreadyRegistered: true,
+      });
+    }
+
+    if (!user) {
+      // Create a passwordless placeholder user
+      const placeholderPassword = crypto.randomBytes(32).toString("hex");
+      user = new User({
+        email: normalizedEmail,
+        password: placeholderPassword,
+        isLeadCapture: true,
+      });
+      await user.save();
+
+      logger.info("Lead capture user created", { userId: user._id, email: normalizedEmail });
+    }
+
+    // Save the website (isActive: false — turns on only after real signup)
+    const existingWebsite = await Website.findOne({ user: user._id, url: normalizedUrl });
+    if (!existingWebsite) {
+      await new Website({
+        user: user._id,
+        url: normalizedUrl,
+        isActive: false,
+        metadata: { source: "lead_capture", speed: 200 },
+      }).save();
+    }
+
+    // Send lead capture email (fire and forget)
+    sendLeadCaptureEmail(normalizedEmail, normalizedUrl).catch(() => {});
+
+    logger.info("Lead capture form submitted", { email: normalizedEmail, websiteUrl: normalizedUrl });
+
+    res.status(201).json({
+      ok: true,
+      message: "Your free traffic has been reserved. Check your email to complete your signup.",
+    });
+  } catch (error) {
+    logger.error("Lead capture failed", { error: error.message });
+    res.status(500).json({ error: "Failed to process your request" });
   }
 });
 

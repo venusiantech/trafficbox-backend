@@ -8,11 +8,11 @@ const userSchema = new mongoose.Schema(
     role: { type: String, enum: ["user", "admin"], default: "user" },
     firstName: { type: String },
     lastName: { type: String },
-    dob: { type: Date }, // Date of Birth
-    cashBalance: { type: Number, default: 0 }, // User's cash balance
-    // Stripe integration
-    stripeCustomerId: { type: String, index: true }, // Stripe customer ID
-    // Add more fields as needed
+    dob: { type: Date },
+    cashBalance: { type: Number, default: 0 },
+    stripeCustomerId: { type: String, index: true },
+    // Set to true for users created via lead-capture form (no real password yet)
+    isLeadCapture: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

@@ -10,6 +10,7 @@ const ChargebackEmail = require("../emails/ChargebackEmail");
 const UpgradeEmail = require("../emails/UpgradeEmail");
 const DowngradeEmail = require("../emails/DowngradeEmail");
 const CustomPlanEmail = require("../emails/CustomPlanEmail");
+const LeadCaptureEmail = require("../emails/LeadCaptureEmail");
 
 let _resend = null;
 function getResend() {
@@ -138,8 +139,18 @@ async function sendCustomPlanEmail(user, plan) {
   });
 }
 
+async function sendLeadCaptureEmail(email, websiteUrl) {
+  return sendEmail(
+    email,
+    "Your 1,000 free visits are reserved — complete your signup",
+    LeadCaptureEmail,
+    { websiteUrl }
+  );
+}
+
 module.exports = {
   sendWelcomeEmail,
+  sendLeadCaptureEmail,
   sendSubscriptionStartedEmail,
   sendSubscriptionCancelledEmail,
   sendChargebackEmail,
