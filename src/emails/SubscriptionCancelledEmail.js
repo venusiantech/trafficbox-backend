@@ -5,6 +5,8 @@ const {
   Body,
   Container,
   Section,
+  Row,
+  Column,
   Text,
   Button,
   Hr,
@@ -43,9 +45,9 @@ function SubscriptionCancelledEmail({
                   React.createElement(Text, { style: styles.infoText },
                     "Your subscription has been cancelled but remains fully active until the end of your current billing period."
                   ),
-                  React.createElement(Text, { style: styles.activeUntilRow },
-                    React.createElement("span", { style: styles.activeUntilKey }, "Access expires on"),
-                    React.createElement("span", { style: styles.activeUntilVal }, formattedActiveUntil)
+                  React.createElement(Row, { style: styles.highlightRow },
+                    React.createElement(Column, { style: styles.highlightKey }, "Access expires on"),
+                    React.createElement(Column, { style: styles.highlightVal }, formattedActiveUntil)
                   ),
                   React.createElement(Text, { style: styles.infoText },
                     "After this date, your account will be moved to the free plan. No further charges will be made."
@@ -86,11 +88,11 @@ const styles = {
   paragraph: { fontSize: "15px", color: "#4b5563", lineHeight: "1.6", margin: "0 0 20px" },
   infoBox: { border: "1px solid #e5e7eb", borderRadius: "6px", padding: "20px 24px", marginBottom: "4px" },
   infoTitle: { fontSize: "12px", fontWeight: "700", color: "#6b7280", letterSpacing: "0.8px", textTransform: "uppercase", margin: "0 0 10px" },
-  innerHr: { borderColor: "#f3f4f6", margin: "0 0 14px" },
+  innerHr: { borderColor: "#f3f4f6", margin: "0 0 12px" },
   infoText: { fontSize: "14px", color: "#4b5563", lineHeight: "1.6", margin: "0 0 12px" },
-  activeUntilRow: { fontSize: "15px", color: "#111827", margin: "12px 0", display: "flex", justifyContent: "space-between", backgroundColor: "#f9fafb", padding: "10px 14px", borderRadius: "5px" },
-  activeUntilKey: { color: "#6b7280", fontSize: "14px" },
-  activeUntilVal: { fontWeight: "700", color: "#111827", fontSize: "14px" },
+  highlightRow: { backgroundColor: "#f9fafb", borderRadius: "5px", width: "100%" },
+  highlightKey: { fontSize: "14px", color: "#6b7280", padding: "10px 14px", width: "55%" },
+  highlightVal: { fontSize: "14px", fontWeight: "700", color: "#111827", padding: "10px 14px", textAlign: "right" },
   hr: { borderColor: "#e5e7eb", margin: "28px 0" },
   button: { backgroundColor: "#111827", color: "#ffffff", fontSize: "14px", fontWeight: "600", textDecoration: "none", padding: "12px 28px", borderRadius: "5px", display: "inline-block", letterSpacing: "0.3px" },
   footer: { fontSize: "12px", color: "#9ca3af", margin: "6px 0", lineHeight: "1.5" },
