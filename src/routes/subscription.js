@@ -181,11 +181,25 @@ router.post("/topup/checkout", requireRole(), async (req, res) => {
     const hitsToAdd = amount * 1000;
     const amountCents = amount * 100;
 
-    // Ensure a Stripe customer exists for this user
-    let user = await User.findById(req.user.id);
-    const subscription = await Subscription.findOne({ user: req.user.id });
+    const user = await User.findById(req.user.id);
 
-    let customerId = subscription?.stripeCustomerId;
+    // Ensure the user has a subscription — create a free one if missing
+    let subscription = await Subscription.findOne({ user: req.user.id });
+    if (!subscription) {
+      const freeConfig = Subscription.getPlanConfig ? Subscription.getPlanConfig("free") : { visitsIncluded: 1000, campaignLimit: 1 };
+      subscription = await new Subscription({
+        user: user._id,
+        planName: "free",
+        status: "active",
+        visitsIncluded: freeConfig.visitsIncluded || 1000,
+        visitsUsed: 0,
+        campaignLimit: freeConfig.campaignLimit || 1,
+      }).save();
+      logger.info("Created missing free subscription for top-up", { userId: user._id });
+    }
+
+    // Ensure a Stripe customer exists
+    let customerId = subscription.stripeCustomerId;
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: user.email,
@@ -193,6 +207,8 @@ router.post("/topup/checkout", requireRole(), async (req, res) => {
         metadata: { userId: user._id.toString() },
       });
       customerId = customer.id;
+      subscription.stripeCustomerId = customerId;
+      await subscription.save();
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -215,6 +231,7 @@ router.post("/topup/checkout", requireRole(), async (req, res) => {
       metadata: {
         isTopUp: "true",
         userId: user._id.toString(),
+        subscriptionId: subscription._id.toString(),
         hitsToAdd: hitsToAdd.toString(),
         amountDollars: amount.toString(),
       },
@@ -764,6 +781,7 @@ router.post(
           // Handle hits top-up payment
           if (session.metadata?.isTopUp === "true") {
             const userId = session.metadata.userId;
+            const subscriptionId = session.metadata.subscriptionId;
             const hitsToAdd = parseInt(session.metadata.hitsToAdd, 10);
             const amountDollars = parseFloat(session.metadata.amountDollars);
 
@@ -772,10 +790,23 @@ router.post(
               break;
             }
 
-            const topUpSubscription = await Subscription.findOne({ user: userId });
+            // Look up by subscriptionId first (reliable), fall back to user field
+            let topUpSubscription = subscriptionId
+              ? await Subscription.findById(subscriptionId)
+              : await Subscription.findOne({ user: userId });
+
+            // If still not found, create a free subscription so the top-up isn't lost
             if (!topUpSubscription) {
-              logger.error("Top-up webhook: subscription not found", { userId });
-              break;
+              logger.warn("Top-up webhook: no subscription found, creating free plan", { userId });
+              topUpSubscription = await new Subscription({
+                user: userId,
+                planName: "free",
+                status: "active",
+                visitsIncluded: 1000,
+                visitsUsed: 0,
+                campaignLimit: 1,
+                stripeCustomerId: session.customer || undefined,
+              }).save();
             }
 
             topUpSubscription.visitsIncluded = (topUpSubscription.visitsIncluded || 0) + hitsToAdd;
