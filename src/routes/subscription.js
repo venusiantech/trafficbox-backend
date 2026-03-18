@@ -24,6 +24,7 @@ const {
   sendUpgradeEmail,
   sendDowngradeEmail,
   sendCustomPlanEmail,
+  sendTopUpEmail,
 } = require("../services/emailService");
 
 const PLAN_ORDER = ["free", "starter", "growth", "business", "premium", "custom"];
@@ -159,6 +160,73 @@ router.post("/checkout", requireRole(), async (req, res) => {
       error: "Failed to create checkout session",
       message: error.message,
     });
+  }
+});
+
+/**
+ * Create a checkout session for a hits top-up ($1 = 1,000 hits)
+ */
+router.post("/topup/checkout", requireRole(), async (req, res) => {
+  try {
+    const { dollars, successUrl, cancelUrl } = req.body;
+
+    const amount = parseInt(dollars, 10);
+    if (!amount || amount < 1) {
+      return res.status(400).json({ error: "Minimum top-up is $1 (1,000 hits)." });
+    }
+    if (amount > 10000) {
+      return res.status(400).json({ error: "Maximum top-up per transaction is $10,000." });
+    }
+
+    const hitsToAdd = amount * 1000;
+    const amountCents = amount * 100;
+
+    // Ensure a Stripe customer exists for this user
+    let user = await User.findById(req.user.id);
+    const subscription = await Subscription.findOne({ user: req.user.id });
+
+    let customerId = subscription?.stripeCustomerId;
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        name: `${user.firstName || ""} ${user.lastName || ""}`.trim() || user.email,
+        metadata: { userId: user._id.toString() },
+      });
+      customerId = customer.id;
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      mode: "payment",
+      payment_method_types: ["card"],
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            unit_amount: amountCents,
+            product_data: {
+              name: `TrafficBoxes Hits Top-Up (${hitsToAdd.toLocaleString()} hits)`,
+              description: `$1 = 1,000 hits. Adding ${hitsToAdd.toLocaleString()} hits to your account.`,
+            },
+          },
+          quantity: 1,
+        },
+      ],
+      metadata: {
+        isTopUp: "true",
+        userId: user._id.toString(),
+        hitsToAdd: hitsToAdd.toString(),
+        amountDollars: amount.toString(),
+      },
+      success_url: successUrl || `${process.env.FRONTEND_URL}/dashboard?topup=success`,
+      cancel_url: cancelUrl || `${process.env.FRONTEND_URL}/dashboard?topup=cancelled`,
+    });
+
+    logger.info("Top-up checkout session created", { userId: req.user.id, hitsToAdd, amountCents });
+    res.json({ ok: true, sessionId: session.id, url: session.url });
+  } catch (error) {
+    logger.error("Top-up checkout session failed", { userId: req.user.id, error: error.message });
+    res.status(500).json({ error: "Failed to create top-up checkout session", message: error.message });
   }
 });
 
@@ -692,7 +760,59 @@ router.post(
 
         case "checkout.session.completed": {
           const session = event.data.object;
-          
+
+          // Handle hits top-up payment
+          if (session.metadata?.isTopUp === "true") {
+            const userId = session.metadata.userId;
+            const hitsToAdd = parseInt(session.metadata.hitsToAdd, 10);
+            const amountDollars = parseFloat(session.metadata.amountDollars);
+
+            if (!userId || isNaN(hitsToAdd) || hitsToAdd < 1) {
+              logger.error("Top-up webhook: invalid metadata", { metadata: session.metadata });
+              break;
+            }
+
+            const topUpSubscription = await Subscription.findOne({ user: userId });
+            if (!topUpSubscription) {
+              logger.error("Top-up webhook: subscription not found", { userId });
+              break;
+            }
+
+            topUpSubscription.visitsIncluded = (topUpSubscription.visitsIncluded || 0) + hitsToAdd;
+            await topUpSubscription.save();
+
+            // Record payment
+            const Payment = require("../models/Payment");
+            try {
+              await new Payment({
+                user: userId,
+                subscription: topUpSubscription._id,
+                stripeCustomerId: session.customer || topUpSubscription.stripeCustomerId,
+                stripePaymentIntentId: session.payment_intent,
+                amount: Math.round(amountDollars * 100),
+                currency: "usd",
+                status: "succeeded",
+                description: `Top-up: +${hitsToAdd.toLocaleString()} hits`,
+                metadata: { isTopUp: true, hitsAdded: hitsToAdd },
+              }).save();
+            } catch (paymentErr) {
+              logger.error("Top-up payment record failed", { error: paymentErr.message });
+            }
+
+            // Send confirmation email
+            const topUpUser = await User.findById(userId);
+            if (topUpUser) {
+              sendTopUpEmail(topUpUser, {
+                hitsAdded: hitsToAdd,
+                amountPaid: amountDollars,
+                newBalance: topUpSubscription.visitsIncluded,
+              }).catch(() => {});
+            }
+
+            logger.info("Top-up applied", { userId, hitsToAdd, newBalance: topUpSubscription.visitsIncluded });
+            break;
+          }
+
           // Handle custom plan payment link completion
           if (session.metadata?.isCustomPlanPayment === "true") {
             const userId = session.metadata.userId;

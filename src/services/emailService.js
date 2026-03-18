@@ -11,6 +11,7 @@ const UpgradeEmail = require("../emails/UpgradeEmail");
 const DowngradeEmail = require("../emails/DowngradeEmail");
 const CustomPlanEmail = require("../emails/CustomPlanEmail");
 const LeadCaptureEmail = require("../emails/LeadCaptureEmail");
+const TopUpEmail = require("../emails/TopUpEmail");
 
 let _resend = null;
 function getResend() {
@@ -148,6 +149,20 @@ async function sendLeadCaptureEmail(email, websiteUrl) {
   );
 }
 
+async function sendTopUpEmail(user, { hitsAdded, amountPaid, newBalance }) {
+  return sendEmail(
+    user.email,
+    "Top-Up Confirmed: Visits Added to Your Account",
+    TopUpEmail,
+    {
+      firstName: user.firstName || "there",
+      hitsAdded,
+      amountPaid,
+      newBalance,
+    }
+  );
+}
+
 module.exports = {
   sendWelcomeEmail,
   sendLeadCaptureEmail,
@@ -157,4 +172,5 @@ module.exports = {
   sendUpgradeEmail,
   sendDowngradeEmail,
   sendCustomPlanEmail,
+  sendTopUpEmail,
 };
