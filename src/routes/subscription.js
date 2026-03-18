@@ -182,24 +182,10 @@ router.post("/topup/checkout", requireRole(), async (req, res) => {
     const amountCents = amount * 100;
 
     const user = await User.findById(req.user.id);
-
-    // Ensure the user has a subscription — create a free one if missing
     let subscription = await Subscription.findOne({ user: req.user.id });
-    if (!subscription) {
-      const freeConfig = Subscription.getPlanConfig ? Subscription.getPlanConfig("free") : { visitsIncluded: 1000, campaignLimit: 1 };
-      subscription = await new Subscription({
-        user: user._id,
-        planName: "free",
-        status: "active",
-        visitsIncluded: freeConfig.visitsIncluded || 1000,
-        visitsUsed: 0,
-        campaignLimit: freeConfig.campaignLimit || 1,
-      }).save();
-      logger.info("Created missing free subscription for top-up", { userId: user._id });
-    }
 
-    // Ensure a Stripe customer exists
-    let customerId = subscription.stripeCustomerId;
+    // Ensure a Stripe customer exists first (needed before creating subscription)
+    let customerId = subscription?.stripeCustomerId;
     if (!customerId) {
       const customer = await stripe.customers.create({
         email: user.email,
@@ -207,6 +193,22 @@ router.post("/topup/checkout", requireRole(), async (req, res) => {
         metadata: { userId: user._id.toString() },
       });
       customerId = customer.id;
+    }
+
+    // Create a free subscription if the user has none
+    if (!subscription) {
+      const freeConfig = Subscription.getPlanConfig ? Subscription.getPlanConfig("free") : { visitsIncluded: 1000, campaignLimit: 1 };
+      subscription = await new Subscription({
+        user: user._id,
+        planName: "free",
+        status: "active",
+        stripeCustomerId: customerId,
+        visitsIncluded: freeConfig.visitsIncluded || 1000,
+        visitsUsed: 0,
+        campaignLimit: freeConfig.campaignLimit || 1,
+      }).save();
+      logger.info("Created missing free subscription for top-up", { userId: user._id });
+    } else if (!subscription.stripeCustomerId) {
       subscription.stripeCustomerId = customerId;
       await subscription.save();
     }
