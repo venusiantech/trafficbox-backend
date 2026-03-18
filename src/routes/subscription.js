@@ -811,6 +811,7 @@ router.post(
               }).save();
             }
 
+            topUpSubscription.topUpCredits = (topUpSubscription.topUpCredits || 0) + hitsToAdd;
             topUpSubscription.visitsIncluded = (topUpSubscription.visitsIncluded || 0) + hitsToAdd;
             await topUpSubscription.save();
 
@@ -825,7 +826,10 @@ router.post(
                 amount: Math.round(amountDollars * 100),
                 currency: "usd",
                 status: "succeeded",
-                description: `Top-up: +${hitsToAdd.toLocaleString()} hits`,
+                type: "top_up",
+                planName: topUpSubscription.planName || "free",
+                description: `Hits top-up: +${hitsToAdd.toLocaleString()} hits ($${amountDollars})`,
+                processedAt: new Date(),
                 metadata: { isTopUp: true, hitsAdded: hitsToAdd },
               }).save();
             } catch (paymentErr) {

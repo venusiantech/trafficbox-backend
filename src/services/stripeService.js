@@ -95,7 +95,7 @@ async function syncSubscriptionFromStripe(stripeSubscription, userId = null) {
     subscription.stripeProductId = productId;
     subscription.planName = planName;
     subscription.status = stripeSubscription.status;
-    subscription.visitsIncluded = planConfig.visitsIncluded;
+    subscription.visitsIncluded = planConfig.visitsIncluded + (subscription.topUpCredits || 0);
     subscription.campaignLimit = planConfig.campaignLimit;
     subscription.features = planConfig.features;
     // Safely convert Stripe timestamps to Date objects with validation

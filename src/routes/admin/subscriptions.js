@@ -760,4 +760,50 @@ router.delete("/users/:userId", requireRole("admin"), async (req, res) => {
   }
 });
 
+/**
+ * Manually add hits to a user's subscription (admin use for missed webhooks etc.)
+ * POST /api/admin/subscriptions/add-hits
+ */
+router.post("/add-hits", requireRole("admin"), async (req, res) => {
+  try {
+    const { email, hitsToAdd, note } = req.body;
+
+    if (!email || !hitsToAdd || isNaN(parseInt(hitsToAdd)) || parseInt(hitsToAdd) < 1) {
+      return res.status(400).json({ error: "email and hitsToAdd (positive integer) are required" });
+    }
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(404).json({ error: `User not found: ${email}` });
+
+    const subscription = await Subscription.findOne({ user: user._id });
+    if (!subscription) return res.status(404).json({ error: "No subscription found for this user" });
+
+    const hits = parseInt(hitsToAdd);
+    const previousBalance = subscription.visitsIncluded;
+    subscription.topUpCredits = (subscription.topUpCredits || 0) + hits;
+    subscription.visitsIncluded += hits;
+    await subscription.save();
+
+    logger.info("Admin manually added hits", {
+      adminId: req.user.id,
+      targetUser: email,
+      hitsAdded: hits,
+      previousBalance,
+      newBalance: subscription.visitsIncluded,
+      note,
+    });
+
+    res.json({
+      ok: true,
+      message: `Added ${hits.toLocaleString()} hits to ${email}`,
+      previousBalance,
+      hitsAdded: hits,
+      newBalance: subscription.visitsIncluded,
+    });
+  } catch (error) {
+    logger.error("Admin add-hits failed", { error: error.message });
+    res.status(500).json({ error: "Failed to add hits", details: error.message });
+  }
+});
+
 module.exports = router;

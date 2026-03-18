@@ -52,7 +52,7 @@ const paymentSchema = new mongoose.Schema(
     // Payment type
     type: {
       type: String,
-      enum: ["subscription", "one_time", "upgrade", "downgrade", "cancellation", "reactivation"],
+      enum: ["subscription", "one_time", "upgrade", "downgrade", "cancellation", "reactivation", "top_up"],
       required: true,
     },
     
