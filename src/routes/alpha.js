@@ -745,6 +745,188 @@ router.get("/campaigns/archived", requireRole(), async (req, res) => {
   }
 });
 
+// Restore an archived Alpha campaign — recreates the project on SparkTraffic
+router.post("/campaigns/:id/restore", requireRole(), async (req, res) => {
+  try {
+    logger.info("Alpha restore requested", { userId: req.user.id, campaignId: req.params.id });
+
+    const c = await Campaign.findById(req.params.id);
+    if (!c || !c.spark_traffic_project_id) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+
+    if (c.user.toString() !== req.user.id && req.user.role !== "admin") {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    if (!c.is_archived) {
+      return res.status(400).json({ error: "Campaign is not archived" });
+    }
+
+    // Check subscription has available visits
+    const subscription = await Subscription.findOne({ user: req.user.id });
+    if (!subscription) {
+      return res.status(400).json({ error: "No active subscription found." });
+    }
+    if (subscription.status !== "active" && subscription.status !== "trialing") {
+      return res.status(400).json({ error: "Your subscription is not active." });
+    }
+    const availableVisits = subscription.visitsIncluded - subscription.visitsUsed;
+    if (availableVisits <= 0) {
+      return res.status(400).json({
+        error: "Insufficient visits in your subscription to restore this campaign.",
+        visitsIncluded: subscription.visitsIncluded,
+        visitsUsed: subscription.visitsUsed,
+      });
+    }
+
+    const axios = require("axios");
+    const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+    const resumeSpeed = (c.spark_traffic_data?.speed) || 200;
+
+    // Step 1: Check if the project still exists on SparkTraffic
+    let projectStillExists = false;
+    try {
+      const allProjectsResp = await axios.post(
+        "https://v2.sparktraffic.com/get-all-website-traffic-projects",
+        { filters: [] },
+        { headers: { "Content-Type": "application/json", API_KEY }, timeout: 10000 }
+      );
+      const activeIds = allProjectsResp.data;
+      projectStillExists = Array.isArray(activeIds) && activeIds.includes(c.spark_traffic_project_id);
+      logger.info("Alpha restore: project existence check", {
+        campaignId: c._id,
+        sparkProjectId: c.spark_traffic_project_id,
+        projectStillExists,
+      });
+    } catch (checkErr) {
+      logger.error("Alpha restore: project list fetch failed", { campaignId: c._id, error: checkErr.message });
+      return res.status(502).json({ error: "Could not verify campaign status. Please try again." });
+    }
+
+    if (projectStillExists) {
+      // Project still exists — just resume it (set speed)
+      try {
+        await axios.post(
+          "https://v2.sparktraffic.com/modify-website-traffic-project",
+          { unique_id: c.spark_traffic_project_id, speed: resumeSpeed },
+          { headers: { "Content-Type": "application/json", API_KEY }, timeout: 10000 }
+        );
+      } catch (resumeErr) {
+        logger.error("Alpha restore: resume existing project failed", { campaignId: c._id, error: resumeErr.message });
+        return res.status(502).json({ error: "Failed to resume campaign. Please try again." });
+      }
+
+      c.is_archived = false;
+      c.archived_at = null;
+      c.state = "ok";
+      c.userState = "running";
+      c.credit_deduction_enabled = true;
+      if (c.metadata) { c.metadata.currentSpeed = resumeSpeed; } else { c.metadata = { currentSpeed: resumeSpeed }; }
+      await c.save();
+
+      logger.campaign("Alpha campaign restored by resuming existing project", {
+        userId: req.user.id, campaignId: c._id, sparkProjectId: c.spark_traffic_project_id,
+      });
+
+      return res.json({
+        ok: true,
+        message: "Campaign restored and resumed successfully.",
+        campaign: createCleanCampaignResponse(c),
+      });
+    }
+
+    // Step 2: Project was deleted — recreate it from stored data
+    const stored = c.spark_traffic_data || {};
+    const sparkPayload = {
+      title: c.title || stored.title || "Restored Campaign",
+      speed: resumeSpeed,
+      size: stored.size || "eco",
+      multiplier: stored.multiplier || 0,
+      traffic_type: stored.traffic_type || "direct",
+      keywords: stored.keywords || "",
+      referrers: stored.referrers || "",
+      social_links: stored.social_links || "",
+      languages: stored.languages || "",
+      bounce_rate: stored.bounce_rate || 0,
+      return_rate: stored.return_rate || 0,
+      click_outbound_events: stored.click_outbound_events || 0,
+      form_submit_events: stored.form_submit_events || 0,
+      scroll_events: stored.scroll_events || 0,
+      time_on_page: stored.time_on_page || "5sec",
+      desktop_rate: stored.desktop_rate || 0,
+      auto_renew: stored.auto_renew || "true",
+      geo_type: stored.geo_type || "global",
+      geo: stored.geo || "",
+      expires_at: 0,
+      created_at: Date.now(),
+    };
+
+    for (let i = 1; i <= 11; i++) {
+      if (stored[`urls-${i}`]) sparkPayload[`urls-${i}`] = stored[`urls-${i}`];
+    }
+    if (!sparkPayload["urls-1"] && c.urls && c.urls.length > 0) {
+      sparkPayload["urls-1"] = c.urls[0];
+      sparkPayload["urls-2"] = c.urls[0];
+      sparkPayload["urls-3"] = c.urls[0];
+    }
+
+    logger.info("Alpha restore: recreating deleted project", {
+      campaignId: c._id, title: sparkPayload.title, hasUrls: !!sparkPayload["urls-1"],
+    });
+
+    let newProjectId;
+    try {
+      const createResp = await axios.post(
+        "https://v2.sparktraffic.com/add-website-traffic-project",
+        sparkPayload,
+        { headers: { "Content-Type": "application/json", API_KEY }, timeout: 15000 }
+      );
+      logger.info("Alpha restore: SparkTraffic create response", { data: createResp.data });
+      newProjectId = createResp.data?.["new-id"] || createResp.data?.id;
+      if (!newProjectId) {
+        return res.status(502).json({ error: "Failed to recreate campaign. Please try again." });
+      }
+    } catch (createErr) {
+      logger.error("Alpha restore: project creation failed", {
+        userId: req.user.id, campaignId: c._id,
+        error: createErr.message, responseData: createErr.response?.data,
+      });
+      return res.status(502).json({ error: "Failed to recreate campaign. Please try again." });
+    }
+
+    c.spark_traffic_project_id = newProjectId;
+    c.is_archived = false;
+    c.archived_at = null;
+    c.state = "ok";
+    c.userState = "running";
+    c.credit_deduction_enabled = true;
+    c.last_stats_check = null;
+    c.total_hits_counted = 0;
+    c.total_visits_counted = 0;
+    if (c.metadata) { c.metadata.currentSpeed = resumeSpeed; } else { c.metadata = { currentSpeed: resumeSpeed }; }
+    await c.save();
+
+    logger.campaign("Alpha campaign restored by recreating project", {
+      userId: req.user.id, campaignId: c._id, newProjectId,
+    });
+
+    res.json({
+      ok: true,
+      message: "Campaign restored and restarted successfully.",
+      campaign: createCleanCampaignResponse(c),
+    });
+  } catch (err) {
+    logger.error("Alpha campaign restore failed", {
+      userId: req.user.id,
+      campaignId: req.params.id,
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Get all Alpha campaigns for authenticated user (SparkTraffic only)
 router.get("/campaigns", requireRole(), async (req, res) => {
   try {
@@ -1177,37 +1359,80 @@ router.post("/campaigns/:id/resume", requireRole(), async (req, res) => {
       });
     }
 
+    const axios = require("axios");
+    const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+
+    // Step 1: Fetch all non-deleted project IDs and verify this one still exists
+    try {
+      const allProjectsResp = await axios.post(
+        "https://v2.sparktraffic.com/get-all-website-traffic-projects",
+        { filters: [] },
+        {
+          headers: { "Content-Type": "application/json", API_KEY },
+          timeout: 10000,
+        }
+      );
+
+      const activeIds = allProjectsResp.data;
+      logger.info("SparkTraffic active project IDs fetched", {
+        campaignId: c._id,
+        sparkProjectId: c.spark_traffic_project_id,
+        totalActive: Array.isArray(activeIds) ? activeIds.length : "non-array",
+        projectFound: Array.isArray(activeIds) && activeIds.includes(c.spark_traffic_project_id),
+      });
+
+        if (!Array.isArray(activeIds) || !activeIds.includes(c.spark_traffic_project_id)) {
+        logger.error("Alpha campaign not found in SparkTraffic active projects", {
+          userId: req.user.id,
+          campaignId: c._id,
+          sparkProjectId: c.spark_traffic_project_id,
+        });
+        c.state = "archived";
+        c.userState = "archived";
+        c.is_archived = true;
+        c.archived_at = new Date();
+        await c.save();
+        return res.status(400).json({
+          error: "This campaign no longer exists and has been archived.",
+        });
+      }
+    } catch (checkErr) {
+      logger.error("SparkTraffic project list fetch failed", {
+        userId: req.user.id,
+        campaignId: c._id,
+        error: checkErr.message,
+      });
+      return res.status(502).json({
+        error: "Could not verify campaign status. Please try again.",
+      });
+    }
+
+    // Step 2: Project confirmed — set speed to 200 to resume
     let vendorResp = null;
     try {
-      // Resume by setting speed to 200 using modify-website-traffic-project endpoint
-      const axios = require("axios");
-      const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
       vendorResp = await axios.post(
         "https://v2.sparktraffic.com/modify-website-traffic-project",
+        { unique_id: c.spark_traffic_project_id, speed: 200 },
         {
-          unique_id: c.spark_traffic_project_id,
-          speed: 200,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            API_KEY,
-          },
+          headers: { "Content-Type": "application/json", API_KEY },
+          timeout: 10000,
         }
       );
     } catch (err) {
-      logger.error("Alpha SparkTraffic resume failed", {
+      logger.error("Alpha SparkTraffic resume (set speed) failed", {
         userId: req.user.id,
         campaignId: c._id,
         error: err.message,
       });
-      vendorResp = { error: err.message };
+      return res.status(502).json({
+        error: "Failed to resume campaign. Please try again.",
+      });
     }
 
+    // Step 3: Both confirmed — update local state
     c.state = "ok";
     c.userState = "running";
-    c.credit_deduction_enabled = true; // Re-enable credit deduction when resuming
-    // Update stored speed in metadata (resume to 200 or previous speed)
+    c.credit_deduction_enabled = true;
     if (c.metadata) {
       c.metadata.currentSpeed = 200;
     } else {
@@ -1224,12 +1449,7 @@ router.post("/campaigns/:id/resume", requireRole(), async (req, res) => {
     return res.json({
       ok: true,
       campaign: createCleanCampaignResponse(c),
-      vendorResp:
-        vendorResp && vendorResp.data
-          ? vendorResp.data
-          : vendorResp && vendorResp.error
-            ? { error: vendorResp.error }
-            : vendorResp,
+      vendorResp: vendorResp?.data || null,
     });
   } catch (err) {
     logger.error("Alpha campaign resume failed", {
