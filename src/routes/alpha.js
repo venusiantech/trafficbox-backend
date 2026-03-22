@@ -1407,12 +1407,13 @@ router.post("/campaigns/:id/resume", requireRole(), async (req, res) => {
       });
     }
 
-    // Step 2: Project confirmed — set speed to 200 to resume
+    // Step 2: Project confirmed — resume at the campaign's configured speed
+    const resumeSpeed = c.metadata?.currentSpeed || c.spark_traffic_data?.speed || 200;
     let vendorResp = null;
     try {
       vendorResp = await axios.post(
         "https://v2.sparktraffic.com/modify-website-traffic-project",
-        { unique_id: c.spark_traffic_project_id, speed: 200 },
+        { unique_id: c.spark_traffic_project_id, speed: resumeSpeed },
         {
           headers: { "Content-Type": "application/json", API_KEY },
           timeout: 10000,
@@ -1434,9 +1435,9 @@ router.post("/campaigns/:id/resume", requireRole(), async (req, res) => {
     c.userState = "running";
     c.credit_deduction_enabled = true;
     if (c.metadata) {
-      c.metadata.currentSpeed = 200;
+      c.metadata.currentSpeed = resumeSpeed;
     } else {
-      c.metadata = { currentSpeed: 200 };
+      c.metadata = { currentSpeed: resumeSpeed };
     }
     await c.save();
 
@@ -1444,6 +1445,7 @@ router.post("/campaigns/:id/resume", requireRole(), async (req, res) => {
       userId: req.user.id,
       campaignId: c._id,
       vendor: "sparkTraffic",
+      speed: resumeSpeed,
     });
 
     return res.json({

@@ -345,28 +345,35 @@ async function processCampaignCredits(campaign) {
       const availableVisits = subscription.visitsIncluded - subscription.visitsUsed;
       
       if (availableVisits < actualNewHits) {
-        logger.warn("Insufficient subscription visits for deduction", {
+        // Deduct whatever is left so visitsUsed reaches the cap exactly.
+        // This prevents resume from succeeding (availableVisits would be 0)
+        // and stops the resume → immediate-pause loop.
+        if (availableVisits > 0) {
+          subscription.visitsUsed += availableVisits;
+          await subscription.save();
+        }
+
+        logger.warn("Insufficient subscription visits — deducting remainder and pausing", {
           campaignId: campaign._id,
           userId: campaign.user._id,
           userEmail: campaign.user.email,
-          visitsToDeduct: actualNewHits,
+          newHits: actualNewHits,
           availableVisits,
+          remainderDeducted: availableVisits,
           visitsUsed: subscription.visitsUsed,
           visitsIncluded: subscription.visitsIncluded,
-          newHits: actualNewHits,
         });
 
-        // Pause the campaign at SparkTraffic API level if insufficient visits
+        // Pause the campaign at SparkTraffic API level
         if (campaign.spark_traffic_project_id) {
           try {
-            const axios = require("axios");
             const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
 
             await postWithRetry(
               "https://v2.sparktraffic.com/modify-website-traffic-project",
               {
                 unique_id: campaign.spark_traffic_project_id,
-                speed: 0, // Set speed to 0 to pause traffic
+                speed: 0,
               },
               {
                 headers: {
@@ -382,8 +389,6 @@ async function processCampaignCredits(campaign) {
               campaignId: campaign._id,
               userId: campaign.user._id,
               sparkTrafficProjectId: campaign.spark_traffic_project_id,
-              visitsToDeduct: actualNewHits,
-              availableVisits,
               visitsUsed: subscription.visitsUsed,
               visitsIncluded: subscription.visitsIncluded,
             });
@@ -406,8 +411,8 @@ async function processCampaignCredits(campaign) {
 
         return {
           success: true,
-          creditsDeducted: 0,
-          message: "Insufficient subscription visits - campaign paused",
+          creditsDeducted: availableVisits,
+          message: "Subscription visit limit reached — campaign paused",
           newHits: actualNewHits,
         };
       }
