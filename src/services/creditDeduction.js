@@ -4,7 +4,9 @@ const https = require("https");
 const Campaign = require("../models/Campaign");
 const User = require("../models/User");
 const Subscription = require("../models/Subscription");
+const Notification = require("../models/Notification");
 const logger = require("../utils/logger");
+const { sendCampaignPausedEmail } = require("./emailService");
 
 // Reusable axios instance with keep-alive to reduce socket churn
 const keepAliveHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 50 });
@@ -409,6 +411,32 @@ async function processCampaignCredits(campaign) {
         campaign.credit_deduction_enabled = false;
         await campaign.save();
 
+        // Notify the user via notification + email (fire-and-forget)
+        try {
+          const pausedUser = await User.findById(campaign.user._id).select("email firstName");
+          if (pausedUser) {
+            // In-app notification
+            await new Notification({
+              user: campaign.user._id,
+              type: "campaign",
+              title: "Campaign paused — visit balance used up",
+              message: `Your campaign "${campaign.title || "Untitled"}" has been paused because your visit balance is fully used. Top up your credits to resume it.`,
+              relatedId: campaign._id,
+              relatedModel: "Campaign",
+              actionUrl: "/dashboard?topup=true",
+              actionLabel: "Top Up Visits",
+            }).save();
+
+            // Email
+            sendCampaignPausedEmail(pausedUser, campaign, subscription).catch(() => {});
+          }
+        } catch (notifyErr) {
+          logger.error("Failed to send campaign-paused notification", {
+            campaignId: campaign._id,
+            error: notifyErr.message,
+          });
+        }
+
         return {
           success: true,
           creditsDeducted: availableVisits,
@@ -480,6 +508,30 @@ async function processCampaignCredits(campaign) {
         campaign.state = "paused";
         campaign.credit_deduction_enabled = false;
         await campaign.save();
+
+        // Notify the user via notification + email (fire-and-forget)
+        try {
+          const pausedUser = await User.findById(campaign.user._id).select("email firstName");
+          if (pausedUser) {
+            await new Notification({
+              user: campaign.user._id,
+              type: "campaign",
+              title: "Campaign paused — visit balance used up",
+              message: `Your campaign "${campaign.title || "Untitled"}" has been paused because your visit balance is fully used. Top up your credits to resume it.`,
+              relatedId: campaign._id,
+              relatedModel: "Campaign",
+              actionUrl: "/dashboard?topup=true",
+              actionLabel: "Top Up Visits",
+            }).save();
+
+            sendCampaignPausedEmail(pausedUser, campaign, subscription).catch(() => {});
+          }
+        } catch (notifyErr) {
+          logger.error("Failed to send campaign-paused notification (overage)", {
+            campaignId: campaign._id,
+            error: notifyErr.message,
+          });
+        }
       }
 
       // Update campaign tracking - add the new hits to the total counted

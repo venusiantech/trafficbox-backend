@@ -12,6 +12,7 @@ const DowngradeEmail = require("../emails/DowngradeEmail");
 const CustomPlanEmail = require("../emails/CustomPlanEmail");
 const LeadCaptureEmail = require("../emails/LeadCaptureEmail");
 const TopUpEmail = require("../emails/TopUpEmail");
+const CampaignPausedEmail = require("../emails/CampaignPausedEmail");
 
 let _resend = null;
 function getResend() {
@@ -163,6 +164,20 @@ async function sendTopUpEmail(user, { hitsAdded, amountPaid, newBalance }) {
   );
 }
 
+async function sendCampaignPausedEmail(user, campaign, subscription) {
+  return sendEmail(
+    user.email,
+    `Campaign paused: "${campaign.title || "Your Campaign"}" — top up to resume`,
+    CampaignPausedEmail,
+    {
+      firstName: user.firstName || "there",
+      campaignTitle: campaign.title || "Your Campaign",
+      visitsIncluded: subscription?.visitsIncluded,
+      visitsUsed: subscription?.visitsUsed,
+    }
+  );
+}
+
 module.exports = {
   sendWelcomeEmail,
   sendLeadCaptureEmail,
@@ -173,4 +188,5 @@ module.exports = {
   sendDowngradeEmail,
   sendCustomPlanEmail,
   sendTopUpEmail,
+  sendCampaignPausedEmail,
 };
