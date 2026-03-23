@@ -267,7 +267,7 @@ router.put("/contact-us-messages/:id", requireRole("admin"), async (req, res) =>
         user: message.user,
         type: "contact_us_replied",
         title: "We Responded to Your Message! 📧",
-        message: `We've replied to your message: "${message.subject}". ${adminNotes ? adminNotes : "Please check your email for our response."}`,
+        message: `We've replied to your message. ${adminNotes ? adminNotes : "Please check your email for our response."}`,
         relatedId: message._id,
         relatedModel: "ContactUsMessage",
       });

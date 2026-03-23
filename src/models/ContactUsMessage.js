@@ -7,7 +7,7 @@ const contactUsMessageSchema = new mongoose.Schema(
       ref: "User",
       required: false, // Optional - can be from non-logged-in users
     },
-    fullName: {
+    firstName: {
       type: String,
       required: true,
       trim: true,
@@ -18,10 +18,10 @@ const contactUsMessageSchema = new mongoose.Schema(
       trim: true,
       lowercase: true,
     },
-    subject: {
+    company: {
       type: String,
-      required: true,
       trim: true,
+      default: "",
     },
     message: {
       type: String,

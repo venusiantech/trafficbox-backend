@@ -158,60 +158,48 @@ router.get("/custom-plan-request", requireRole(), async (req, res) => {
  */
 router.post("/contact-us", optionalAuth, async (req, res) => {
   try {
-    const { fullName, email, subject, message } = req.body;
+    const { firstName, email, company, message } = req.body;
 
-    // Validation
-    if (!fullName || !fullName.trim()) {
-      return res.status(400).json({ error: "Full name is required" });
+    if (!firstName || !firstName.trim()) {
+      return res.status(400).json({ error: "First name is required" });
     }
 
     if (!email || !email.trim()) {
       return res.status(400).json({ error: "Email is required" });
     }
 
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({ error: "Invalid email address" });
-    }
-
-    if (!subject || !subject.trim()) {
-      return res.status(400).json({ error: "Subject is required" });
     }
 
     if (!message || !message.trim()) {
       return res.status(400).json({ error: "Message is required" });
     }
 
-    // Try to find user by email (from JWT or by searching email)
+    // Try to find user by JWT or by email
     let userId = req.user ? req.user.id : null;
-    
-    // If no JWT, try to find user by email
     if (!userId) {
       const user = await User.findOne({ email: email.trim().toLowerCase() });
-      if (user) {
-        userId = user._id;
-      }
+      if (user) userId = user._id;
     }
 
-    // Create the contact us message
     const contactUsMessage = new ContactUsMessage({
-      user: userId, // Link to user if found, null if guest
-      fullName: fullName.trim(),
+      user: userId,
+      firstName: firstName.trim(),
       email: email.trim().toLowerCase(),
-      subject: subject.trim(),
+      company: company ? company.trim() : "",
       message: message.trim(),
     });
 
     await contactUsMessage.save();
 
-    // Create notification if user exists
     if (userId) {
       const notification = new Notification({
         user: userId,
         type: "contact_us_submitted",
         title: "Contact Message Received",
-        message: `We received your message: "${subject.trim()}". Our team will respond soon.`,
+        message: `We received your message. Our team will respond soon.`,
         relatedId: contactUsMessage._id,
         relatedModel: "ContactUsMessage",
       });
@@ -221,9 +209,7 @@ router.post("/contact-us", optionalAuth, async (req, res) => {
     logger.info("Contact us message submitted", {
       messageId: contactUsMessage._id,
       email: contactUsMessage.email,
-      subject: contactUsMessage.subject,
       userId: userId || "guest",
-      linkedToUser: !!userId,
     });
 
     res.status(201).json({
