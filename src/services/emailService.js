@@ -13,6 +13,8 @@ const CustomPlanEmail = require("../emails/CustomPlanEmail");
 const LeadCaptureEmail = require("../emails/LeadCaptureEmail");
 const TopUpEmail = require("../emails/TopUpEmail");
 const CampaignPausedEmail = require("../emails/CampaignPausedEmail");
+const ContactAckEmail = require("../emails/ContactAckEmail");
+const ContactReplyEmail = require("../emails/ContactReplyEmail");
 
 let _resend = null;
 function getResend() {
@@ -178,6 +180,29 @@ async function sendCampaignPausedEmail(user, campaign, subscription) {
   );
 }
 
+async function sendContactAckEmail(firstName, email, message) {
+  return sendEmail(
+    email,
+    "We received your message — TrafficBoxes Support",
+    ContactAckEmail,
+    { firstName, message }
+  );
+}
+
+async function sendContactReplyEmail(firstName, email, status, adminNotes = "") {
+  const subjects = {
+    read: "Your message is being reviewed",
+    replied: "We have responded to your inquiry",
+    archived: "Your support request has been resolved",
+  };
+  return sendEmail(
+    email,
+    subjects[status] || "Update on your message — TrafficBoxes",
+    ContactReplyEmail,
+    { firstName, status, adminNotes }
+  );
+}
+
 module.exports = {
   sendWelcomeEmail,
   sendLeadCaptureEmail,
@@ -189,4 +214,6 @@ module.exports = {
   sendCustomPlanEmail,
   sendTopUpEmail,
   sendCampaignPausedEmail,
+  sendContactAckEmail,
+  sendContactReplyEmail,
 };

@@ -5,6 +5,7 @@ const ContactUsMessage = require("../../models/ContactUsMessage");
 const Notification = require("../../models/Notification");
 const User = require("../../models/User");
 const logger = require("../../utils/logger");
+const { sendContactReplyEmail } = require("../../services/emailService");
 
 const router = express.Router();
 
@@ -260,6 +261,16 @@ router.put("/contact-us-messages/:id", requireRole("admin"), async (req, res) =>
     }
 
     await message.save();
+
+    // Send email to user on status changes that are meaningful to them
+    if (["read", "replied", "archived"].includes(status) && status !== oldStatus) {
+      sendContactReplyEmail(
+        message.firstName || "there",
+        message.email,
+        status,
+        adminNotes || ""
+      ).catch(() => {});
+    }
 
     // Create notification for the user when replied (only if user exists)
     if (message.user && status === "replied" && oldStatus !== "replied") {

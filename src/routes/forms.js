@@ -8,7 +8,7 @@ const User = require("../models/User");
 const Website = require("../models/Website");
 const logger = require("../utils/logger");
 const jwt = require("jsonwebtoken");
-const { sendLeadCaptureEmail } = require("../services/emailService");
+const { sendLeadCaptureEmail, sendContactAckEmail } = require("../services/emailService");
 
 const router = express.Router();
 
@@ -205,6 +205,8 @@ router.post("/contact-us", optionalAuth, async (req, res) => {
       });
       await notification.save();
     }
+
+    sendContactAckEmail(firstName.trim(), email.trim().toLowerCase(), message.trim()).catch(() => {});
 
     logger.info("Contact us message submitted", {
       messageId: contactUsMessage._id,
