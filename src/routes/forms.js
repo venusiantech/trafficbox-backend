@@ -276,6 +276,10 @@ router.post("/lead-capture", async (req, res) => {
       });
     }
 
+    // Generate a 48-hour activation token
+    const activationToken = crypto.randomBytes(32).toString("hex");
+    const activationTokenExpiry = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
     if (!user) {
       // Create a passwordless placeholder user
       const placeholderPassword = crypto.randomBytes(32).toString("hex");
@@ -283,10 +287,16 @@ router.post("/lead-capture", async (req, res) => {
         email: normalizedEmail,
         password: placeholderPassword,
         isLeadCapture: true,
+        activationToken,
+        activationTokenExpiry,
       });
       await user.save();
-
       logger.info("Lead capture user created", { userId: user._id, email: normalizedEmail });
+    } else {
+      // Existing lead-capture user — refresh the token so they get a new valid link
+      user.activationToken = activationToken;
+      user.activationTokenExpiry = activationTokenExpiry;
+      await user.save();
     }
 
     // Save the website (isActive: false — turns on only after real signup)
@@ -300,8 +310,8 @@ router.post("/lead-capture", async (req, res) => {
       }).save();
     }
 
-    // Send lead capture email (fire and forget)
-    sendLeadCaptureEmail(normalizedEmail, normalizedUrl).catch(() => {});
+    // Send lead capture email with activation token (fire and forget)
+    sendLeadCaptureEmail(normalizedEmail, normalizedUrl, activationToken).catch(() => {});
 
     logger.info("Lead capture form submitted", { email: normalizedEmail, websiteUrl: normalizedUrl });
 

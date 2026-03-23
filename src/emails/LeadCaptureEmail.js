@@ -12,10 +12,11 @@ const {
   Hr,
 } = require("@react-email/components");
 
-function LeadCaptureEmail({ websiteUrl }) {
+function LeadCaptureEmail({ websiteUrl, activationToken }) {
   const displayUrl = websiteUrl
     ? websiteUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")
     : null;
+  const activateUrl = `https://trafficboxes.com/activate${activationToken ? `?token=${activationToken}` : ""}`;
 
   return (
     React.createElement(Html, null,
@@ -28,7 +29,7 @@ function LeadCaptureEmail({ websiteUrl }) {
           React.createElement(Section, { style: styles.content },
             React.createElement(Text, { style: styles.label }, "Your Free Traffic is Reserved"),
             React.createElement(Text, { style: styles.greeting },
-              "1,000 free visits are waiting for you"
+              "2,000 free visits are waiting for you"
             ),
             React.createElement(Text, { style: styles.paragraph },
               "We have reserved your free traffic allocation. Here is what is ready for your website:"
@@ -39,7 +40,7 @@ function LeadCaptureEmail({ websiteUrl }) {
               React.createElement(Hr, { style: styles.innerHr }),
               React.createElement(Row, { style: styles.row },
                 React.createElement(Column, { style: styles.keyCol }, "Free visits"),
-                React.createElement(Column, { style: styles.valCol }, "1,000")
+                React.createElement(Column, { style: styles.valCol }, "2,000")
               ),
               React.createElement(Row, { style: styles.row },
                 React.createElement(Column, { style: styles.keyCol }, "Active campaigns"),
@@ -59,9 +60,9 @@ function LeadCaptureEmail({ websiteUrl }) {
 
             React.createElement(Hr, { style: styles.hr }),
             React.createElement(Button, {
-              href: `${process.env.FRONTEND_URL || "https://trafficboxes.com"}/register`,
+              href: activateUrl,
               style: styles.button
-            }, "Create Your Account"),
+            }, "Activate Your Account"),
             React.createElement(Hr, { style: styles.hr }),
             React.createElement(Text, { style: styles.footer },
               "This offer was triggered by a visit to TrafficBoxes. If you did not request this, you can ignore this email."

@@ -231,7 +231,7 @@ subscriptionSchema.statics.getPlanConfig = function (planName) {
   const plans = {
     free: {
       planName: "free",
-      visitsIncluded: 1000,
+      visitsIncluded: 2000,
       campaignLimit: 1,
       price: 0,
       features: {

@@ -141,12 +141,12 @@ async function sendCustomPlanEmail(user, plan) {
   });
 }
 
-async function sendLeadCaptureEmail(email, websiteUrl) {
+async function sendLeadCaptureEmail(email, websiteUrl, activationToken) {
   return sendEmail(
     email,
-    "Your 1,000 free visits are reserved — complete your signup",
+    "Your 2,000 free visits are reserved — activate your account",
     LeadCaptureEmail,
-    { websiteUrl }
+    { websiteUrl, activationToken }
   );
 }
 

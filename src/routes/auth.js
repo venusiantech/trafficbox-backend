@@ -73,6 +73,60 @@ router.post("/register", async (req, res) => {
   }
 });
 
+// Activate lead-capture account using token from email
+router.post("/activate", async (req, res) => {
+  try {
+    const { token, password, firstName, lastName } = req.body;
+    if (!token || !password) {
+      return res.status(400).json({ error: "Token and password are required" });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters" });
+    }
+
+    const user = await User.findOne({
+      activationToken: token,
+      activationTokenExpiry: { $gt: new Date() },
+    });
+
+    if (!user) {
+      return res.status(400).json({ error: "Activation link is invalid or has expired. Please request a new one." });
+    }
+
+    user.password = password;
+    user.isLeadCapture = false;
+    user.activationToken = undefined;
+    user.activationTokenExpiry = undefined;
+    if (firstName) user.firstName = firstName;
+    if (lastName) user.lastName = lastName;
+    await user.save();
+
+    sendWelcomeEmail(user).catch(() => {});
+
+    const jwtToken = jwt.sign(
+      { id: user._id, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      success: true,
+      message: "Account activated successfully",
+      token: jwtToken,
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        role: user.role,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Login
 router.post("/login", async (req, res) => {
   try {

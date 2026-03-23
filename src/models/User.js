@@ -13,6 +13,9 @@ const userSchema = new mongoose.Schema(
     stripeCustomerId: { type: String, index: true },
     // Set to true for users created via lead-capture form (no real password yet)
     isLeadCapture: { type: Boolean, default: false },
+    // Token for activating a lead-capture account (expires in 48h)
+    activationToken: { type: String, index: true },
+    activationTokenExpiry: { type: Date },
   },
   { timestamps: true }
 );
