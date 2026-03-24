@@ -1,7 +1,9 @@
 const express = require("express");
+const axios = require("axios");
 const { requireRole } = require("../../middleware/auth");
 const Campaign = require("../../models/Campaign");
 const User = require("../../models/User");
+const Subscription = require("../../models/Subscription");
 
 const router = express.Router();
 
@@ -40,67 +42,14 @@ router.get("/", requireRole("admin"), async (req, res) => {
         hasNext: page * limit < totalCampaigns,
         hasPrev: page > 1,
       },
-      filters: { vendor, state },
+      filters: { state },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Get all Alpha campaigns for transfer management
-router.get("/alpha/transferable", requireRole("admin"), async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
-    const skip = (page - 1) * limit;
 
-    // Find all Alpha campaigns
-    const [campaigns, totalCampaigns] = await Promise.all([
-      Campaign.find({
-        spark_traffic_project_id: { $exists: true, $ne: null },
-      })
-        .populate("user", "email firstName lastName")
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit),
-      Campaign.countDocuments({
-        spark_traffic_project_id: { $exists: true, $ne: null },
-      }),
-    ]);
-
-    // Add transfer count to each campaign
-    const campaignsWithTransferInfo = campaigns.map((campaign) => ({
-      ...campaign.toObject(),
-      transferCount: campaign.transfer_history
-        ? campaign.transfer_history.length
-        : 0,
-      lastTransfer:
-        campaign.transfer_history && campaign.transfer_history.length > 0
-          ? campaign.transfer_history[campaign.transfer_history.length - 1]
-              .transferred_at
-          : null,
-    }));
-
-    res.json({
-      status: "success",
-      campaigns: campaignsWithTransferInfo,
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(totalCampaigns / limit),
-        totalCampaigns,
-        hasNext: page * limit < totalCampaigns,
-        hasPrev: page > 1,
-      },
-    });
-  } catch (error) {
-    console.error("Error fetching transferable campaigns:", error);
-    res.status(500).json({
-      status: "error",
-      message: "Internal server error",
-      error: error.message,
-    });
-  }
-});
 
 // Get transfer history for a campaign
 router.get("/:campaignId/transfer-history", requireRole("admin"), async (req, res) => {
@@ -329,42 +278,64 @@ router.post("/:campaignId/:action", requireRole("admin"), async (req, res) => {
     const { campaignId, action } = req.params;
 
     if (!["pause", "resume"].includes(action)) {
-      return res
-        .status(400)
-        .json({ error: "Invalid action. Use 'pause' or 'resume'" });
+      return res.status(400).json({ error: "Invalid action. Use 'pause' or 'resume'" });
     }
 
-    const campaign = await Campaign.findById(campaignId).populate(
-      "user",
-      "email firstName lastName"
-    );
-    if (!campaign)
-      return res.status(404).json({ error: "Campaign not found" });
+    const campaign = await Campaign.findById(campaignId).populate("user", "email firstName lastName");
+    if (!campaign) return res.status(404).json({ error: "Campaign not found" });
 
-    let vendorResp = null;
+    // On resume, check the campaign owner's subscription
+    if (action === "resume") {
+      const subscription = await Subscription.findOne({ user: campaign.user._id });
+      if (!subscription) {
+        return res.status(400).json({ error: "Campaign owner has no subscription." });
+      }
+      if (subscription.status !== "active" && subscription.status !== "trialing") {
+        return res.status(400).json({
+          error: `Campaign owner's subscription is ${subscription.status}. Cannot resume.`,
+          subscriptionStatus: subscription.status,
+        });
+      }
+
+      // Check available visits
+      const availableVisits = subscription.visitsIncluded - subscription.visitsUsed;
+      if (availableVisits <= 0) {
+        return res.status(400).json({
+          error: "Campaign owner has no visits remaining in their subscription.",
+          visitsIncluded: subscription.visitsIncluded,
+          visitsUsed: subscription.visitsUsed,
+        });
+      }
+
+      // Check active campaign count vs plan limit
+      const activeCampaignCount = await Campaign.countDocuments({
+        user: campaign.user._id,
+        $or: [{ is_archived: { $exists: false } }, { is_archived: false }],
+      });
+      if (activeCampaignCount >= subscription.campaignLimit) {
+        return res.status(400).json({
+          error: `Campaign owner has reached their plan limit of ${subscription.campaignLimit} active campaigns.`,
+          campaignLimit: subscription.campaignLimit,
+          activeCampaigns: activeCampaignCount,
+        });
+      }
+    }
 
     // Handle SparkTraffic campaigns
     if (campaign.spark_traffic_project_id) {
-      try {
-        const axios = require("axios");
-        const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+      const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+      const resumeSpeed = action === "resume"
+        ? (campaign.metadata?.currentSpeed || campaign.spark_traffic_data?.speed || 200)
+        : 0;
 
-        vendorResp = await axios.post(
-          "https://v2.sparktraffic.com/edit-website-traffic-project",
-          {
-            id: campaign.spark_traffic_project_id,
-            speed: action === "pause" ? 0 : 200,
-            size: "eco",
-          },
-          {
-            headers: {
-              "Content-Type": "application/json",
-              API_KEY,
-            },
-          }
+      try {
+        await axios.post(
+          "https://v2.sparktraffic.com/modify-website-traffic-project",
+          { unique_id: campaign.spark_traffic_project_id, speed: resumeSpeed },
+          { headers: { "Content-Type": "application/json", API_KEY }, timeout: 10000 }
         );
       } catch (err) {
-        vendorResp = { error: err.message };
+        // Log but don't block — still update DB state
       }
     }
 
@@ -373,57 +344,71 @@ router.post("/:campaignId/:action", requireRole("admin"), async (req, res) => {
       try {
         const nine = require("../../services/nineHits");
         if (action === "pause") {
-          vendorResp = await nine.sitePause({
-            id: campaign.nine_hits_campaign_id,
-          });
+          await nine.sitePause({ id: campaign.nine_hits_campaign_id });
         } else {
-          vendorResp = await nine.siteUpdate({
-            id: campaign.nine_hits_campaign_id,
-            userState: "running",
-          });
+          await nine.siteUpdate({ id: campaign.nine_hits_campaign_id, userState: "running" });
         }
       } catch (err) {
-        vendorResp = { error: err.message };
+        // Log but don't block
       }
     }
 
     // Update campaign state
-    campaign.state = action === "pause" ? "paused" : "ok";
-    if (action === "resume") campaign.userState = "running";
+    if (action === "pause") {
+      campaign.state = "paused";
+      campaign.userState = "paused";
+      campaign.credit_deduction_enabled = false;
+      if (campaign.metadata) { campaign.metadata.currentSpeed = 0; } else { campaign.metadata = { currentSpeed: 0 }; }
+    } else {
+      campaign.state = "ok";
+      campaign.userState = "running";
+      campaign.credit_deduction_enabled = true;
+    }
     await campaign.save();
 
     res.json({
       ok: true,
-      message: `Campaign ${action}d successfully by admin`,
-      campaign,
-      vendorResp:
-        vendorResp && vendorResp.data ? vendorResp.data : vendorResp,
+      message: `Campaign ${action}d successfully`,
+      campaign: {
+        id: campaign._id,
+        title: campaign.title,
+        state: campaign.state,
+        userState: campaign.userState,
+        credit_deduction_enabled: campaign.credit_deduction_enabled,
+      },
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Delete Campaign (Admin Override)
+// Delete Campaign (Admin Override) — pauses on vendor first, then hard-deletes
 router.delete("/:campaignId", requireRole("admin"), async (req, res) => {
   try {
-    const campaign = await Campaign.findById(req.params.campaignId).populate(
-      "user",
-      "email firstName lastName"
-    );
-    if (!campaign)
-      return res.status(404).json({ error: "Campaign not found" });
+    const campaign = await Campaign.findById(req.params.campaignId);
+    if (!campaign) return res.status(404).json({ error: "Campaign not found" });
 
-    // Try to delete from vendor
-    let vendorResp = null;
+    // Pause on SparkTraffic before deleting
+    if (campaign.spark_traffic_project_id) {
+      const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+      try {
+        await axios.post(
+          "https://v2.sparktraffic.com/modify-website-traffic-project",
+          { unique_id: campaign.spark_traffic_project_id, speed: 0 },
+          { headers: { "Content-Type": "application/json", API_KEY }, timeout: 10000 }
+        );
+      } catch (err) {
+        // Proceed with deletion even if pause fails (campaign may already be gone)
+      }
+    }
+
+    // Pause on 9Hits before deleting
     if (campaign.nine_hits_campaign_id) {
       try {
         const nine = require("../../services/nineHits");
-        vendorResp = await nine.siteDelete({
-          id: campaign.nine_hits_campaign_id,
-        });
+        await nine.sitePause({ id: campaign.nine_hits_campaign_id });
       } catch (err) {
-        vendorResp = { error: err.message };
+        // Proceed regardless
       }
     }
 
@@ -431,9 +416,9 @@ router.delete("/:campaignId", requireRole("admin"), async (req, res) => {
 
     res.json({
       ok: true,
-      message: "Campaign deleted successfully by admin",
-      deletedCampaign: campaign,
-      vendorResp,
+      message: "Campaign deleted successfully",
+      deletedId: campaign._id,
+      title: campaign.title,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
