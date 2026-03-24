@@ -27,8 +27,17 @@ class AlphaTrafficDataCollector {
     this.collectionIntervalMs = intervalMs;
     this.isRunning = true;
 
-    this.intervalId = setInterval(async () => {
-      await this.collectAllAlphaCampaignData();
+    // Important: never let errors from the interval task bubble up and
+    // crash the whole server (Mongo may be temporarily unavailable).
+    this.intervalId = setInterval(() => {
+      this.collectAllAlphaCampaignData().catch((error) => {
+        logger.error(
+          "Alpha traffic data collector interval failed (non-fatal)",
+          {
+            error: error?.message || "Unknown error",
+          }
+        );
+      });
     }, this.collectionIntervalMs);
 
     logger.info("Alpha traffic data collector started", {

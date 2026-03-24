@@ -111,6 +111,12 @@ app.use("/api/forms", require("./routes/forms")); // Contact forms and custom pl
 app.use("/api/notifications", require("./routes/notifications")); // User notifications
 app.use("/api/statistics", require("./routes/statistics")); // Aggregated statistics
 
+// SEO suite (free, non-AI stubs for now)
+const seoSuitRoutes = require("./routes/seoSuit");
+app.use("/api/seo-suit", seoSuitRoutes);
+// Back-compat: allow calling without /api prefix.
+app.use("/seo-suit", seoSuitRoutes);
+
 // Start sync worker
 require("./sync/syncWorker")();
 
