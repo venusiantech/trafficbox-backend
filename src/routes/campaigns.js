@@ -1,6 +1,7 @@
 const express = require("express");
 const { requireRole } = require("../middleware/auth");
 const Campaign = require("../models/Campaign");
+const AlphaTrafficData = require("../models/AlphaTrafficData");
 const User = require("../models/User");
 const Subscription = require("../models/Subscription");
 const vendors = require("../services/vendors");
@@ -134,6 +135,32 @@ async function fetchCampaignStats(campaign) {
 }
 
 // Helper function to create clean campaign response (hiding implementation details)
+// Fetch last-7-day daily hits/visits from AlphaTrafficData for a set of campaign IDs.
+// Returns a Map: campaignId (string) -> { dailyHits, dailyVisits }
+async function fetchDailyStatsBatch(campaignIds) {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const raw = await AlphaTrafficData.find(
+    { campaign: { $in: campaignIds }, timestamp: { $gte: since } },
+    { campaign: 1, timestamp: 1, hits: 1, visits: 1 }
+  ).sort({ timestamp: 1 }).lean();
+
+  const map = new Map();
+  for (const row of raw) {
+    const key = row.campaign.toString();
+    if (!map.has(key)) map.set(key, { dailyHits: [], dailyVisits: [] });
+    const day = row.timestamp.toISOString().slice(0, 10);
+    const entry = map.get(key);
+    // Accumulate into date buckets
+    let hBucket = entry.dailyHits.find((b) => b.date === day);
+    if (!hBucket) { hBucket = { date: day, hits: 0 }; entry.dailyHits.push(hBucket); }
+    hBucket.hits += row.hits || 0;
+    let vBucket = entry.dailyVisits.find((b) => b.date === day);
+    if (!vBucket) { vBucket = { date: day, visits: 0 }; entry.dailyVisits.push(vBucket); }
+    vBucket.visits += row.visits || 0;
+  }
+  return map;
+}
+
 function createCleanCampaignResponse(
   campaign,
   includeStats = false,
@@ -578,32 +605,42 @@ router.get("/", requireRole(), async (req, res) => {
       },
     });
 
-    // Fetch stats for each campaign and create clean responses
+    // Batch-fetch daily stats for all SparkTraffic campaigns in one query
+    const sparkCampaignIds = campaigns
+      .filter((c) => c.spark_traffic_project_id)
+      .map((c) => c._id);
+    const dailyStatsMap = sparkCampaignIds.length
+      ? await fetchDailyStatsBatch(sparkCampaignIds)
+      : new Map();
+
+    // Build response for each campaign
     const campaignsWithStats = await Promise.all(
       campaigns.map(async (campaign) => {
-        // Check if user wants stats included (via query parameter)
-        const includeStats = req.query.include_stats === 'true';
-        
-        if (includeStats && campaign.spark_traffic_project_id) {
+        if (!campaign.spark_traffic_project_id) {
+          return createCleanCampaignResponse(campaign, false, null);
+        }
+
+        // Detailed vendor stats only when explicitly requested
+        if (req.query.include_stats === "true") {
           const vendorStats = await fetchCampaignStats(campaign);
           return createCleanCampaignResponse(campaign, true, vendorStats);
-        } else {
-          // Always include basic stats for SparkTraffic campaigns
-          if (campaign.spark_traffic_project_id) {
-            const basicStats = {
-              totalHits: campaign.total_hits_counted || 0,
-              totalVisits: campaign.total_visits_counted || 0,
-              speed: campaign.state === "paused" ? 0 : 200,
-              status: campaign.state === "paused" ? "paused" : "active",
-              dailyHits: [],
-              dailyVisits: [],
-            };
-            return createCleanCampaignResponse(campaign, true, basicStats);
-          } else {
-            // No stats for non-SparkTraffic campaigns
-            return createCleanCampaignResponse(campaign, false, null);
-          }
         }
+
+        const daily = dailyStatsMap.get(campaign._id.toString()) || { dailyHits: [], dailyVisits: [] };
+        const isPaused = campaign.state === "paused" || campaign.is_archived;
+        const speed = isPaused
+          ? 0
+          : (campaign.metadata?.currentSpeed ?? campaign.spark_traffic_data?.speed ?? 200);
+
+        const basicStats = {
+          totalHits: campaign.total_hits_counted || 0,
+          totalVisits: campaign.total_visits_counted || 0,
+          speed,
+          status: isPaused ? "paused" : "active",
+          dailyHits: daily.dailyHits,
+          dailyVisits: daily.dailyVisits,
+        };
+        return createCleanCampaignResponse(campaign, true, basicStats);
       })
     );
 
@@ -620,7 +657,6 @@ router.get("/", requireRole(), async (req, res) => {
       },
       filters: {
         status: req.query.status || null,
-        vendor: req.query.vendor || null,
         include_archived: req.query.include_archived === "true",
       },
     });
@@ -691,12 +727,30 @@ router.get("/archived", requireRole(), async (req, res) => {
     const archivedCampaigns = await Campaign.find({
       user: req.user.id,
       is_archived: true,
-    }).sort({ archived_at: -1 });
+    }).sort({ archived_at: -1 }).lean();
 
-    // Clean up archived campaign data
-    const cleanArchivedCampaigns = archivedCampaigns.map((campaign) =>
-      createCleanCampaignResponse(campaign)
-    );
+    const sparkIds = archivedCampaigns
+      .filter((c) => c.spark_traffic_project_id)
+      .map((c) => c._id);
+    const dailyStatsMap = sparkIds.length
+      ? await fetchDailyStatsBatch(sparkIds)
+      : new Map();
+
+    const cleanArchivedCampaigns = archivedCampaigns.map((campaign) => {
+      if (!campaign.spark_traffic_project_id) {
+        return createCleanCampaignResponse(campaign, false, null);
+      }
+      const daily = dailyStatsMap.get(campaign._id.toString()) || { dailyHits: [], dailyVisits: [] };
+      const basicStats = {
+        totalHits: campaign.total_hits_counted || 0,
+        totalVisits: campaign.total_visits_counted || 0,
+        speed: 0,
+        status: "archived",
+        dailyHits: daily.dailyHits,
+        dailyVisits: daily.dailyVisits,
+      };
+      return createCleanCampaignResponse(campaign, true, basicStats);
+    });
 
     res.json({
       ok: true,
@@ -1543,10 +1597,13 @@ router.delete("/:id", requireRole(), async (req, res) => {
       }
     }
 
-    // Archive the campaign
+    // Archive the campaign — stop credit deduction immediately
     c.is_archived = true;
     c.archived_at = new Date();
     c.state = "archived";
+    c.userState = "archived";
+    c.credit_deduction_enabled = false;
+    if (c.metadata) { c.metadata.currentSpeed = 0; } else { c.metadata = { currentSpeed: 0 }; }
     await c.save();
 
     logger.campaign("Campaign archived", {
@@ -1609,7 +1666,7 @@ router.post("/:id/restore", requireRole(), async (req, res) => {
       const axios = require("axios");
       const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
 
-      // Check subscription has available visits
+      // Check subscription
       const Subscription = require("../models/Subscription");
       const subscription = await Subscription.findOne({ user: c.user._id });
       if (!subscription) {
@@ -1618,6 +1675,21 @@ router.post("/:id/restore", requireRole(), async (req, res) => {
       if (subscription.status !== "active" && subscription.status !== "trialing") {
         return res.status(400).json({ error: "Your subscription is not active." });
       }
+
+      // Check campaign limit — count active (non-archived) campaigns
+      const activeCampaignCount = await Campaign.countDocuments({
+        user: c.user._id,
+        $or: [{ is_archived: { $exists: false } }, { is_archived: false }],
+      });
+      if (activeCampaignCount >= subscription.campaignLimit) {
+        return res.status(400).json({
+          error: `You have reached your plan's campaign limit of ${subscription.campaignLimit}. Pause or delete an active campaign before restoring this one.`,
+          campaignLimit: subscription.campaignLimit,
+          activeCampaigns: activeCampaignCount,
+        });
+      }
+
+      // Check available visits
       const availableVisits = subscription.visitsIncluded - subscription.visitsUsed;
       if (availableVisits <= 0) {
         return res.status(400).json({
