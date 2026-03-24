@@ -2,6 +2,8 @@ const express = require("express");
 const router = express.Router();
 const { authenticateJWT, requireAdmin } = require("../middleware/auth");
 const Blog = require("../models/Blog");
+const SEOAnalysis = require("../models/SEOAnalysis");
+const Subscription = require("../models/Subscription");
 const logger = require("../utils/logger");
 
 // GET all published blogs (public endpoint)
@@ -490,6 +492,36 @@ router.post("/ai/seo-analysis-pro", authenticateJWT, async (req, res) => {
         message: "Invalid URL format",
       });
     }
+
+    // --- Subscription-based SEO analysis limit ---
+    const subscription = await Subscription.findOne({ user: req.user.id });
+    const planName = subscription?.planName || "free";
+    const planConfig = Subscription.getPlanConfig(planName);
+    const seoLimit = planConfig.seoAnalysisLimit ?? 2;
+
+    if (seoLimit !== -1) {
+      // Count analyses used in the current billing period
+      const periodStart = subscription?.currentPeriodStart
+        ? new Date(subscription.currentPeriodStart)
+        : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // fallback: last 30 days
+
+      const usedThisPeriod = await SEOAnalysis.countDocuments({
+        user: req.user.id,
+        createdAt: { $gte: periodStart },
+      });
+
+      if (usedThisPeriod >= seoLimit) {
+        return res.status(403).json({
+          status: "error",
+          code: "SEO_ANALYSIS_LIMIT_REACHED",
+          message: `You have used ${usedThisPeriod} of ${seoLimit} SEO analyses allowed on your ${planName} plan. Upgrade to run more.`,
+          used: usedThisPeriod,
+          limit: seoLimit,
+          planName,
+        });
+      }
+    }
+    // --- End limit check ---
 
     // Set default value for includeBacklinks to true
     const includeBacklinks = includeBacklinksParam !== undefined ? includeBacklinksParam : true;

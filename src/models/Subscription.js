@@ -233,6 +233,7 @@ subscriptionSchema.statics.getPlanConfig = function (planName) {
       planName: "free",
       visitsIncluded: 2000,
       campaignLimit: 1,
+      seoAnalysisLimit: 2,
       price: 0,
       features: {
         countryTargeting: "global",
@@ -247,6 +248,7 @@ subscriptionSchema.statics.getPlanConfig = function (planName) {
       planName: "starter",
       visitsIncluded: 50000,
       campaignLimit: 2,
+      seoAnalysisLimit: 4,
       price: 49,
       features: {
         countryTargeting: "global",
@@ -261,6 +263,7 @@ subscriptionSchema.statics.getPlanConfig = function (planName) {
       planName: "growth",
       visitsIncluded: 250000,
       campaignLimit: 3,
+      seoAnalysisLimit: 6,
       price: 199,
       features: {
         countryTargeting: "select",
@@ -275,6 +278,7 @@ subscriptionSchema.statics.getPlanConfig = function (planName) {
       planName: "business",
       visitsIncluded: 500000,
       campaignLimit: 5,
+      seoAnalysisLimit: 10,
       price: 349,
       features: {
         countryTargeting: "select",
@@ -289,6 +293,7 @@ subscriptionSchema.statics.getPlanConfig = function (planName) {
       planName: "premium",
       visitsIncluded: 10000000,
       campaignLimit: 10,
+      seoAnalysisLimit: -1, // unlimited
       price: 599,
       features: {
         countryTargeting: "advanced",
@@ -303,6 +308,7 @@ subscriptionSchema.statics.getPlanConfig = function (planName) {
       planName: "custom",
       visitsIncluded: 0, // Will be set by admin
       campaignLimit: 0, // Will be set by admin
+      seoAnalysisLimit: -1, // unlimited for custom plans
       price: 0, // Will be set by admin
       features: {
         countryTargeting: "advanced",
