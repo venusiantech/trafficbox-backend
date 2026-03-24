@@ -505,19 +505,27 @@ router.post("/ai/seo-analysis-pro", authenticateJWT, async (req, res) => {
         ? new Date(subscription.currentPeriodStart)
         : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // fallback: last 30 days
 
+      // Only count analyses created after the limit feature was introduced,
+      // so existing users are not immediately penalised for past usage.
+      const cutoffDate = process.env.SEO_LIMIT_EFFECTIVE_DATE
+        ? new Date(process.env.SEO_LIMIT_EFFECTIVE_DATE)
+        : new Date("2025-03-17");
+      const countFrom = new Date(Math.max(periodStart.getTime(), cutoffDate.getTime()));
+
       const usedThisPeriod = await SEOAnalysis.countDocuments({
         user: req.user.id,
-        createdAt: { $gte: periodStart },
+        createdAt: { $gte: countFrom },
       });
 
       if (usedThisPeriod >= seoLimit) {
         return res.status(403).json({
           status: "error",
           code: "SEO_ANALYSIS_LIMIT_REACHED",
-          message: `You have used ${usedThisPeriod} of ${seoLimit} SEO analyses allowed on your ${planName} plan. Upgrade to run more.`,
+          message: `You have used ${usedThisPeriod} of ${seoLimit} SEO analyses allowed on your ${planName} plan this billing period. Upgrade to run more.`,
           used: usedThisPeriod,
           limit: seoLimit,
           planName,
+          periodStart: countFrom,
         });
       }
     }
