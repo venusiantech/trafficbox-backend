@@ -36,7 +36,25 @@ const router = express.Router();
  */
 router.get("/subscription", requireRole(), async (req, res) => {
   try {
+    const SEOAnalysis = require("../models/SEOAnalysis");
+
     const subscription = await getSubscriptionDetails(req.user.id);
+    const planConfig = Subscription.getPlanConfig(subscription.planName);
+    const seoLimit = planConfig.seoAnalysisLimit ?? 2;
+
+    // Count SEO analyses used this billing period (respecting the cutoff date)
+    const periodStart = subscription.currentPeriodStart
+      ? new Date(subscription.currentPeriodStart)
+      : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const cutoffDate = process.env.SEO_LIMIT_EFFECTIVE_DATE
+      ? new Date(process.env.SEO_LIMIT_EFFECTIVE_DATE)
+      : new Date("2025-03-17");
+    const countFrom = new Date(Math.max(periodStart.getTime(), cutoffDate.getTime()));
+
+    const seoAnalysesUsed = await SEOAnalysis.countDocuments({
+      user: req.user.id,
+      createdAt: { $gte: countFrom },
+    });
 
     res.json({
       ok: true,
@@ -47,6 +65,9 @@ router.get("/subscription", requireRole(), async (req, res) => {
         visitsUsed: subscription.visitsUsed,
         campaignLimit: subscription.campaignLimit,
         currentCampaignCount: subscription.currentCampaignCount || 0,
+        seoAnalysisLimit: seoLimit === -1 ? null : seoLimit, // null means unlimited
+        seoAnalysesUsed,
+        seoAnalysesRemaining: seoLimit === -1 ? null : Math.max(0, seoLimit - seoAnalysesUsed),
         features: subscription.features,
         currentPeriodStart: subscription.currentPeriodStart,
         currentPeriodEnd: subscription.currentPeriodEnd,
