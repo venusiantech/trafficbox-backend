@@ -7,6 +7,26 @@ const Subscription = require("../../models/Subscription");
 
 const router = express.Router();
 
+// Get SparkTraffic Account Balance
+router.get("/alpha/balance", requireRole("admin"), async (req, res) => {
+  try {
+    const API_KEY = process.env.SPARKTRAFFIC_API_KEY?.trim();
+    if (!API_KEY) {
+      return res.status(500).json({ error: "SparkTraffic API key not configured" });
+    }
+
+    const response = await axios.get("https://v2.sparktraffic.com/balance", {
+      headers: { api_key: API_KEY },
+      timeout: 10000,
+    });
+
+    res.json({ ok: true, balance: response.data });
+  } catch (err) {
+    const status = err.response?.status || 500;
+    res.status(status).json({ error: err.response?.data || err.message });
+  }
+});
+
 // Get All Campaigns with Details
 router.get("/", requireRole("admin"), async (req, res) => {
   try {
